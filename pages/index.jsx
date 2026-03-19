@@ -73,8 +73,7 @@ const DEFAULT_SCENE_STATE = `늦은 오전, 집.
 분위기는 가볍고 생활감 있다.
 수원이는 장난스럽게 말을 걸 수 있지만, user 반응은 놓치지 않는다.`;
 
-const FIRST_PROMPT =
-  '오늘도 늦게까지 잠을 자고 있던 수원이가 비몽사몽 일어나 말을 한다.\n\n"배고파.."';
+const FIRST_AI_LINE = "배고파... 너 뭐 먹을래.";
 
 // ── storage ──────────────────────────────────────────────
 async function sg(key) {
@@ -189,12 +188,13 @@ ${recentUserText}
 이 마지막 발화의 감정과 의도를 먼저 반영해서 답한다.`
     : "";
 
-  const bmText = Array.isArray(bookmarks) && bookmarks.length
-    ? "\n\n[중요 사건]\n" +
-      bookmarks
-        .map((b, i) => `${i + 1}. ${b?.summary || "기억된 사건"}`)
-        .join("\n")
-    : "";
+  const bmText =
+    Array.isArray(bookmarks) && bookmarks.length
+      ? "\n\n[중요 사건]\n" +
+        bookmarks
+          .map((b, i) => `${i + 1}. ${b?.summary || "기억된 사건"}`)
+          .join("\n")
+      : "";
 
   const noteText = note?.trim() ? "\n\n[참고 메모]\n" + note : "";
 
@@ -1019,23 +1019,9 @@ function ChatView({
       }
 
       try {
-        const system = buildSystem(
-          neroRef.current,
-          hoeonRef.current,
-          relationRef.current,
-          sceneRef.current,
-          bookmarksRef.current,
-          noteRef.current,
-          FIRST_PROMPT
-        );
-
-        const reply = await callClaude(system, [{ role: "user", content: FIRST_PROMPT }]);
-
-        const m = [{ type: "ai", text: reply, id: 1 }];
-        const h = [
-          { role: "user", content: FIRST_PROMPT },
-          { role: "assistant", content: reply },
-        ];
+        const firstLine = FIRST_AI_LINE;
+        const m = [{ type: "ai", text: firstLine, id: 1 }];
+        const h = [{ role: "assistant", content: firstLine }];
 
         setMsgs(m);
         histRef.current = h;
@@ -1205,23 +1191,9 @@ function ChatView({
     await ss(STORAGE.scene, sceneRef.current);
 
     try {
-      const system = buildSystem(
-        neroRef.current,
-        hoeonRef.current,
-        relationRef.current,
-        sceneRef.current,
-        bookmarksRef.current,
-        noteRef.current,
-        FIRST_PROMPT
-      );
-
-      const reply = await callClaude(system, [{ role: "user", content: FIRST_PROMPT }]);
-
-      const m = [{ type: "ai", text: reply, id: Date.now() }];
-      const h = [
-        { role: "user", content: FIRST_PROMPT },
-        { role: "assistant", content: reply },
-      ];
+      const firstLine = FIRST_AI_LINE;
+      const m = [{ type: "ai", text: firstLine, id: Date.now() }];
+      const h = [{ role: "assistant", content: firstLine }];
 
       setMsgs(m);
       histRef.current = h;
