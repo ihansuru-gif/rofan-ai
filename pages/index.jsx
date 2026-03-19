@@ -45,6 +45,7 @@ const DEFAULT_NERO = {
     { name: "눈치", value: 4 },
     { name: "애정결핍", value: 3 },
   ],
+  photo: "",
 };
 
 const DEFAULT_HOEON = {
@@ -59,6 +60,7 @@ const DEFAULT_HOEON = {
     { name: "장난수용", value: 3 },
     { name: "설렘", value: 4 },
   ],
+  photo: "",
 };
 
 const DEFAULT_RELATION_STATE = `서로 동거 중인 연인이다.
@@ -84,11 +86,33 @@ async function sg(key) {
     return null;
   }
 }
+
 async function ss(key, val) {
   try {
     if (typeof window === "undefined") return;
     localStorage.setItem(key, JSON.stringify(val));
   } catch {}
+}
+
+function normalizeProfile(profile, fallback) {
+  return {
+    ...fallback,
+    ...(profile || {}),
+    name: profile?.name?.trim() || fallback.name,
+    title: profile?.title?.trim() || fallback.title,
+    personality: profile?.personality?.trim() || fallback.personality,
+    world:
+      typeof fallback.world === "string"
+        ? profile?.world?.trim() || fallback.world
+        : profile?.world?.trim() || "",
+    speech:
+      typeof fallback.speech === "string"
+        ? profile?.speech?.trim() || fallback.speech
+        : profile?.speech?.trim() || "",
+    tags: Array.isArray(profile?.tags) ? profile.tags : fallback.tags,
+    stats: Array.isArray(profile?.stats) ? profile.stats : fallback.stats,
+    photo: profile?.photo || fallback.photo || "",
+  };
 }
 
 // ── API ──────────────────────────────────────────────────
@@ -98,8 +122,26 @@ async function callClaude(system, messages) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, messages }),
   });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`서버 응답 파싱 실패 (${res.status})`);
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.error || `요청 실패 (${res.status})`);
+  }
+
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+
+  if (!data?.text) {
+    throw new Error("응답 본문이 비어 있습니다.");
+  }
+
   return data.text;
 }
 
@@ -115,19 +157,23 @@ function buildSystem(
 ) {
   const stars = (v) => "★".repeat(v) + "☆".repeat(5 - v);
 
-  const neroStats = nero.stats?.length
+  const safeNeroStats = Array.isArray(nero?.stats) ? nero.stats : [];
+  const safeHoeonStats = Array.isArray(hoeon?.stats) ? hoeon.stats : [];
+  const hoeonName = hoeon?.name?.trim() || "user";
+
+  const neroStats = safeNeroStats.length
     ? "\n\n[" +
       nero.name +
       " 스탯]\n" +
-      nero.stats
+      safeNeroStats
         .map((s) => `• ${s.name}: ${stars(s.value)} (${s.value}/5)`)
         .join("\n")
     : "";
 
   const hoeonText = `\n\n[user 정보]
-이름: ${hoeon.name}
-설명: ${hoeon.personality}
-스탯: ${hoeon.stats.map((s) => `${s.name} ${stars(s.value)}`).join(", ")}`;
+이름: ${hoeonName}
+설명: ${hoeon?.personality || ""}
+스탯: ${safeHoeonStats.map((s) => `${s.name} ${stars(s.value)}`).join(", ")}`;
 
   const relationText = relationState?.trim()
     ? `\n\n[현재 관계 상태]\n${relationState}`
@@ -143,9 +189,11 @@ ${recentUserText}
 이 마지막 발화의 감정과 의도를 먼저 반영해서 답한다.`
     : "";
 
-  const bmText = bookmarks?.length
+  const bmText = Array.isArray(bookmarks) && bookmarks.length
     ? "\n\n[중요 사건]\n" +
-      bookmarks.map((b, i) => `${i + 1}. ${b.summary}`).join("\n")
+      bookmarks
+        .map((b, i) => `${i + 1}. ${b?.summary || "기억된 사건"}`)
+        .join("\n")
     : "";
 
   const noteText = note?.trim() ? "\n\n[참고 메모]\n" + note : "";
@@ -157,8 +205,16 @@ ${recentUserText}
 - 능글맞고 장난스럽게 말할 수 있지만, 중요한 감정은 가볍게 넘기지 않는다.
 - 상대의 감정 변화와 대화 흐름을 놓치지 않는다.
 - 말투보다 맥락 이해가 우선이다.
-- 답변은 짧고 자연스럽게, 2~4문장 안에서 끝낸다.
+- 답변은 1~3문장 위주로 짧고 자연스럽게 말한다. 길어도 4문장을 넘기지 않는다.
+- 상담사, 코치, 안내문 같은 말투를 쓰지 않는다.
+- 선택지를 여러 개 나열하지 않는다.
 - 행동묘사는 필요할 때만 *별표 사이에* 짧게 쓴다.
+
+[호칭 규칙]
+- user의 현재 이름/호칭은 '${hoeonName}'이다.
+- 특별히 어색하지 않으면 이 호칭을 자연스럽게 사용한다.
+- 매 문장마다 반복하지 않는다.
+- 기존 대화 습관보다 현재 설정된 호칭을 우선한다.
 
 [${nero.name} 설정]
 ${nero.personality}
@@ -193,17 +249,19 @@ function StarRating({ value, onChange, readonly = false }) {
 }
 
 // ── 스탯 에디터 ──────────────────────────────────────────
-function StatsEditor({ stats, onChange }) {
+function StatsEditor({ stats = [], onChange }) {
   const setName = (i, v) => {
     const s = [...stats];
     s[i] = { ...s[i], name: v };
     onChange(s);
   };
+
   const setVal = (i, v) => {
     const s = [...stats];
     s[i] = { ...s[i], value: v };
     onChange(s);
   };
+
   const add = () => onChange([...stats, { name: "새 스탯", value: 3 }]);
   const del = (i) => onChange(stats.filter((_, j) => j !== i));
 
@@ -316,8 +374,14 @@ function EditModal({ title, children }) {
 
 // ── 수원이 편집 ──────────────────────────────────────────
 function NeroEditModal({ profile, onSave, onClose }) {
-  const [form, setForm] = useState({ ...profile, tags: profile.tags.join(", ") });
+  const [form, setForm] = useState(() => ({
+    ...profile,
+    tags: Array.isArray(profile.tags) ? profile.tags.join(", ") : "",
+    stats: Array.isArray(profile.stats) ? profile.stats : [],
+  }));
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
   const fi = {
     background: C.bg3,
     border: `1px solid ${C.border2}`,
@@ -401,8 +465,14 @@ function NeroEditModal({ profile, onSave, onClose }) {
 
 // ── 내 프로필 편집 ───────────────────────────────────────
 function HoeonEditModal({ profile, onSave, onClose }) {
-  const [form, setForm] = useState({ ...profile, tags: profile.tags.join(", ") });
+  const [form, setForm] = useState(() => ({
+    ...profile,
+    tags: Array.isArray(profile.tags) ? profile.tags.join(", ") : "",
+    stats: Array.isArray(profile.stats) ? profile.stats : [],
+  }));
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
   const fi = {
     background: C.bg3,
     border: `1px solid ${C.border2}`,
@@ -494,6 +564,9 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
   };
   const fileRef = useRef(null);
 
+  const safeTags = Array.isArray(profile.tags) ? profile.tags : [];
+  const safeStats = Array.isArray(profile.stats) ? profile.stats : [];
+
   const [cropSrc, setCropSrc] = useState(null);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -501,19 +574,38 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
   const [natSize, setNatSize] = useState({ w: 1, h: 1 });
   const CSIZE = 220;
 
+  const getCoverScale = (w, h) => Math.max(CSIZE / w, CSIZE / h);
+
+  const clampPos = (x, y, w, h, nextScale) => {
+    const dispW = w * nextScale;
+    const dispH = h * nextScale;
+    const limitX = Math.max(0, (dispW - CSIZE) / 2);
+    const limitY = Math.max(0, (dispH - CSIZE) / 2);
+
+    return {
+      x: Math.min(limitX, Math.max(-limitX, x)),
+      y: Math.min(limitY, Math.max(-limitY, y)),
+    };
+  };
+
   const openCrop = (e) => {
-    const file = e.target.files[0];
+    const file = e.target.files?.[0];
     if (!file) return;
-    fileRef.current.value = "";
+
+    if (fileRef.current) {
+      fileRef.current.value = "";
+    }
+
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
         const nw = img.naturalWidth;
         const nh = img.naturalHeight;
+        const baseScale = getCoverScale(nw, nh);
+
         setNatSize({ w: nw, h: nh });
-        const initScale = Math.min(CSIZE / nw, CSIZE / nh);
-        setScale(initScale);
+        setScale(baseScale);
         setPos({ x: 0, y: 0 });
         setCropSrc(ev.target.result);
       };
@@ -523,6 +615,8 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
   };
 
   const applyCrop = () => {
+    if (!cropSrc) return;
+
     const canvas = document.createElement("canvas");
     canvas.width = CSIZE;
     canvas.height = CSIZE;
@@ -546,16 +640,21 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
   };
 
   const startDrag = (cx, cy) => setDrag({ sx: cx, sy: cy, ox: pos.x, oy: pos.y });
+
   const moveDrag = (cx, cy) => {
     if (!drag) return;
-    setPos({ x: drag.ox + (cx - drag.sx), y: drag.oy + (cy - drag.sy) });
+    const nextX = drag.ox + (cx - drag.sx);
+    const nextY = drag.oy + (cy - drag.sy);
+    setPos(clampPos(nextX, nextY, natSize.w, natSize.h, scale));
   };
+
   const endDrag = () => setDrag(null);
 
   return (
     <div
       style={{
         flex: 1,
+        minHeight: 0,
         overflowY: "auto",
         padding: "20px 18px",
         display: "flex",
@@ -660,11 +759,15 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
             <span style={{ fontSize: 11, color: C.muted3, flexShrink: 0 }}>축소</span>
             <input
               type="range"
-              min={Math.min(CSIZE / natSize.w, CSIZE / natSize.h) * 0.3}
-              max={Math.max(CSIZE / natSize.w, CSIZE / natSize.h) * 5}
+              min={getCoverScale(natSize.w, natSize.h)}
+              max={getCoverScale(natSize.w, natSize.h) * 5}
               step="0.001"
               value={scale}
-              onChange={(e) => setScale(parseFloat(e.target.value))}
+              onChange={(e) => {
+                const nextScale = parseFloat(e.target.value);
+                setScale(nextScale);
+                setPos((prev) => clampPos(prev.x, prev.y, natSize.w, natSize.h, nextScale));
+              }}
               style={{ flex: 1 }}
             />
             <span style={{ fontSize: 11, color: C.muted3, flexShrink: 0 }}>확대</span>
@@ -715,7 +818,7 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
         }}
       >
         <div
-          onClick={() => fileRef.current.click()}
+          onClick={() => fileRef.current?.click()}
           style={{
             width: 68,
             height: 68,
@@ -749,8 +852,12 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
               opacity: 0,
               transition: "opacity 0.15s",
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = 0)}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.opacity = 1;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.opacity = 0;
+            }}
           >
             <span style={{ fontSize: 18, color: "#fff" }}>📷</span>
           </div>
@@ -758,11 +865,11 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
 
         <input ref={fileRef} type="file" accept="image/*" onChange={openCrop} style={{ display: "none" }} />
 
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 20, fontWeight: 600, letterSpacing: 2 }}>{profile.name}</div>
           <div style={{ fontSize: 11, color: C.text3, letterSpacing: 1, marginTop: 3 }}>{profile.title}</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-            {profile.tags.map((t) => (
+            {safeTags.map((t) => (
               <span
                 key={t}
                 style={{
@@ -791,6 +898,7 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
             fontSize: 10,
             fontFamily: "inherit",
             cursor: "pointer",
+            flexShrink: 0,
           }}
         >
           ✎ 수정
@@ -800,7 +908,7 @@ function ProfileView({ profile, avatar, onEdit, onPhotoChange, showWorld = false
       <div>
         <div style={sec}>스탯</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {profile.stats.map((s, i) => (
+          {safeStats.map((s, i) => (
             <div
               key={i}
               style={{
@@ -870,6 +978,7 @@ function ChatView({
   const [busy, setBusy] = useState(true);
   const [showNote, setShowNote] = useState(false);
   const [showBM, setShowBM] = useState(false);
+
   const histRef = useRef([]);
   const bottomRef = useRef(null);
   const taRef = useRef(null);
@@ -891,46 +1000,55 @@ function ChatView({
         sg(STORAGE.scene),
       ]);
 
-      if (sm?.length && sh?.length) {
+      if (Array.isArray(sm) && sm.length && Array.isArray(sh) && sh.length) {
         setMsgs(sm);
         histRef.current = sh;
-        if (sr) {
+
+        if (typeof sr === "string" && sr.trim()) {
           relationRef.current = sr;
           onRelationChange(sr);
         }
-        if (sscene) {
+
+        if (typeof sscene === "string" && sscene.trim()) {
           sceneRef.current = sscene;
           onSceneChange(sscene);
         }
+
         setBusy(false);
-      } else {
-        try {
-          const system = buildSystem(
-            neroRef.current,
-            hoeonRef.current,
-            relationRef.current,
-            sceneRef.current,
-            bookmarksRef.current,
-            noteRef.current,
-            FIRST_PROMPT
-          );
-          const reply = await callClaude(system, [{ role: "user", content: FIRST_PROMPT }]);
-          const m = [{ type: "ai", text: reply, id: 1 }];
-          const h = [
-            { role: "user", content: FIRST_PROMPT },
-            { role: "assistant", content: reply },
-          ];
-          setMsgs(m);
-          histRef.current = h;
-          await ss(STORAGE.msgs, m);
-          await ss(STORAGE.hist, h);
-          await ss(STORAGE.relation, relationRef.current);
-          await ss(STORAGE.scene, sceneRef.current);
-        } catch (e) {
-          setMsgs([{ type: "ai", text: "오류: " + e.message, id: 1 }]);
-        }
-        setBusy(false);
+        return;
       }
+
+      try {
+        const system = buildSystem(
+          neroRef.current,
+          hoeonRef.current,
+          relationRef.current,
+          sceneRef.current,
+          bookmarksRef.current,
+          noteRef.current,
+          FIRST_PROMPT
+        );
+
+        const reply = await callClaude(system, [{ role: "user", content: FIRST_PROMPT }]);
+
+        const m = [{ type: "ai", text: reply, id: 1 }];
+        const h = [
+          { role: "user", content: FIRST_PROMPT },
+          { role: "assistant", content: reply },
+        ];
+
+        setMsgs(m);
+        histRef.current = h;
+
+        await ss(STORAGE.msgs, m);
+        await ss(STORAGE.hist, h);
+        await ss(STORAGE.relation, relationRef.current);
+        await ss(STORAGE.scene, sceneRef.current);
+      } catch (e) {
+        setMsgs([{ type: "ai", text: "오류: " + e.message, id: 1 }]);
+      }
+
+      setBusy(false);
     })();
   }, [hoeonRef, neroRef, noteRef, onRelationChange, onSceneChange, relationRef, sceneRef, bookmarksRef]);
 
@@ -945,6 +1063,7 @@ function ChatView({
       setBusy(true);
       const tid = Date.now();
       setMsgs((m) => [...m, { type: "t", text: "대화를 정리하는 중...", id: tid }]);
+
       try {
         const system = buildSystem(
           neroRef.current,
@@ -954,10 +1073,12 @@ function ChatView({
           bookmarksRef.current,
           noteRef.current
         );
+
         const summary = await callClaude(system, [
           ...histRef.current,
           { role: "user", content: "지금까지의 분위기와 관계 흐름을 3~5줄로 요약해줘." },
         ]);
+
         setMsgs((m) => {
           const next = m.map((msg) =>
             msg.id === tid ? { type: "summary", text: summary, id: tid } : msg
@@ -972,6 +1093,7 @@ function ChatView({
           )
         );
       }
+
       setBusy(false);
       return;
     }
@@ -1006,7 +1128,9 @@ function ChatView({
       histRef.current = finalHist;
 
       setMsgs((m) => {
-        const next = m.map((msg) => (msg.id === tid ? { type: "ai", text: reply, id: rid } : msg));
+        const next = m.map((msg) =>
+          msg.id === tid ? { type: "ai", text: reply, id: rid } : msg
+        );
         ss(STORAGE.msgs, next);
         return next;
       });
@@ -1019,39 +1143,44 @@ function ChatView({
         )
       );
     }
+
     setBusy(false);
   }, [busy, input, neroRef, hoeonRef, relationRef, sceneRef, bookmarksRef, noteRef]);
 
   const addBookmark = useCallback(
     async (msg) => {
       setBusy(true);
+
       try {
         const summary = await callClaude(
           "다음 장면에서 감정적으로 중요한 순간을 20자 이내로 짧게 요약해줘. 요약문만 출력해.",
           [{ role: "user", content: msg.text }]
         );
+
         const newBM = [
-          ...bookmarksRef.current,
+          ...(Array.isArray(bookmarksRef.current) ? bookmarksRef.current : []),
           { summary: summary.trim(), time: new Date().toLocaleDateString("ko-KR") },
         ];
+
         onBookmarksChange(newBM);
         await ss(STORAGE.bm, newBM);
       } catch (e) {
         alert("북마크 실패: " + e.message);
       }
+
       setBusy(false);
     },
     [bookmarksRef, onBookmarksChange]
   );
 
   const delBM = async (i) => {
-    const n = bookmarksRef.current.filter((_, j) => j !== i);
+    const n = (Array.isArray(bookmarksRef.current) ? bookmarksRef.current : []).filter((_, j) => j !== i);
     onBookmarksChange(n);
     await ss(STORAGE.bm, n);
   };
 
   const editBM = async (i, newSummary) => {
-    const n = bookmarksRef.current.map((bm, j) =>
+    const n = (Array.isArray(bookmarksRef.current) ? bookmarksRef.current : []).map((bm, j) =>
       j === i ? { ...bm, summary: newSummary } : bm
     );
     onBookmarksChange(n);
@@ -1065,9 +1194,11 @@ function ChatView({
 
   const clearChat = async () => {
     if (!confirm("대화를 초기화할까요?")) return;
+
     setBusy(true);
     setMsgs([]);
     histRef.current = [];
+
     await ss(STORAGE.msgs, []);
     await ss(STORAGE.hist, []);
     await ss(STORAGE.relation, relationRef.current);
@@ -1083,24 +1214,29 @@ function ChatView({
         noteRef.current,
         FIRST_PROMPT
       );
+
       const reply = await callClaude(system, [{ role: "user", content: FIRST_PROMPT }]);
+
       const m = [{ type: "ai", text: reply, id: Date.now() }];
       const h = [
         { role: "user", content: FIRST_PROMPT },
         { role: "assistant", content: reply },
       ];
+
       setMsgs(m);
       histRef.current = h;
+
       await ss(STORAGE.msgs, m);
       await ss(STORAGE.hist, h);
     } catch (e) {
       setMsgs([{ type: "ai", text: "오류: " + e.message, id: 1 }]);
     }
+
     setBusy(false);
   };
 
-  const bms = bookmarksRef.current;
-  const note = noteRef.current;
+  const bms = Array.isArray(bookmarksRef.current) ? bookmarksRef.current : [];
+  const note = typeof noteRef.current === "string" ? noteRef.current : "";
 
   return (
     <>
@@ -1168,6 +1304,20 @@ function ChatView({
         >
           ↺ 초기화
         </button>
+      </div>
+
+      <div
+        style={{
+          background: C.bg4,
+          borderBottom: `1px solid ${C.border}`,
+          padding: "8px 14px",
+          fontSize: 11,
+          color: C.text3,
+          lineHeight: 1.6,
+          flexShrink: 0,
+        }}
+      >
+        이름/호칭 변경 후 기존 대화에는 예전 호칭이 남을 수 있어요. 필요하면 초기화하세요.
       </div>
 
       {/* 메모 패널 */}
@@ -1278,6 +1428,7 @@ function ChatView({
       <div
         style={{
           flex: 1,
+          minHeight: 0,
           overflowY: "auto",
           padding: "18px 16px",
           display: "flex",
@@ -1367,7 +1518,10 @@ function ChatView({
                     wordBreak: "break-word",
                     borderRadius: msg.type === "u" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
                     background: msg.type === "u" ? C.border : msg.type === "t" ? C.bg4 : C.bg3,
-                    border: msg.type === "u" ? "none" : `1px solid ${msg.type === "t" ? "#252015" : C.border}`,
+                    border:
+                      msg.type === "u"
+                        ? "none"
+                        : `1px solid ${msg.type === "t" ? "#252015" : C.border}`,
                     color: msg.type === "t" ? C.muted2 : C.text,
                     fontStyle: msg.type === "t" ? "italic" : "normal",
                   }}
@@ -1499,12 +1653,12 @@ export default function App() {
         sg(STORAGE.scene),
       ]);
 
-      const n = sn || DEFAULT_NERO;
-      const h = sh || DEFAULT_HOEON;
-      const bm = sbm || [];
-      const no = sno || "";
-      const rel = sr || DEFAULT_RELATION_STATE;
-      const scn = sscene || DEFAULT_SCENE_STATE;
+      const n = normalizeProfile(sn, DEFAULT_NERO);
+      const h = normalizeProfile(sh, DEFAULT_HOEON);
+      const bm = Array.isArray(sbm) ? sbm : [];
+      const no = typeof sno === "string" ? sno : "";
+      const rel = typeof sr === "string" && sr.trim() ? sr : DEFAULT_RELATION_STATE;
+      const scn = typeof sscene === "string" && sscene.trim() ? sscene : DEFAULT_SCENE_STATE;
 
       neroRef.current = n;
       hoeonRef.current = h;
@@ -1523,16 +1677,18 @@ export default function App() {
   }, []);
 
   const saveNero = async (p) => {
-    neroRef.current = p;
-    setNero(p);
-    await ss(STORAGE.neroProfile, p);
+    const normalized = normalizeProfile(p, DEFAULT_NERO);
+    neroRef.current = normalized;
+    setNero(normalized);
+    await ss(STORAGE.neroProfile, normalized);
     setEditingNero(false);
   };
 
   const saveHoeon = async (p) => {
-    hoeonRef.current = p;
-    setHoeon(p);
-    await ss(STORAGE.hoeonProfile, p);
+    const normalized = normalizeProfile(p, DEFAULT_HOEON);
+    hoeonRef.current = normalized;
+    setHoeon(normalized);
+    await ss(STORAGE.hoeonProfile, normalized);
     setEditingHoeon(false);
   };
 
@@ -1577,13 +1733,14 @@ export default function App() {
       <div
         style={{
           background: C.bg,
-          height: 720,
+          minHeight: "100vh",
+          height: "100dvh",
+          width: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           color: C.muted,
           fontFamily: "sans-serif",
-          borderRadius: 12,
         }}
       >
         불러오는 중...
@@ -1598,8 +1755,9 @@ export default function App() {
         color: C.text,
         display: "flex",
         flexDirection: "column",
-        height: 720,
-        borderRadius: 12,
+        minHeight: "100vh",
+        height: "100dvh",
+        width: "100%",
         overflow: "hidden",
         fontFamily: "'Noto Sans KR',sans-serif",
         position: "relative",
@@ -1641,6 +1799,7 @@ export default function App() {
           display: tab === "chat" ? "flex" : "none",
           flexDirection: "column",
           flex: 1,
+          minHeight: 0,
           overflow: "hidden",
         }}
       >
