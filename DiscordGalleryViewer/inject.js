@@ -1,7 +1,9 @@
 (() => {
   if (window.__DGV__) return;
 
-  const api = window.screenShareGallery || window.discordGallery;
+  const api = window.screenShareGallery;
+  if (!api) return;
+
   const state = {
     provider: 'discord',
     focus: false,
@@ -44,17 +46,28 @@
 
   function selectorCandidates() {
     const discordSelectors = [
-      '[class*="callContainer_"]', '[class*="videoGrid_"]', '[class*="callContainer"]', '[class*="videoGrid"]'
+      '[class*="callContainer_"]',
+      '[class*="videoGrid_"]',
+      '[class*="callContainer"]',
+      '[class*="videoGrid"]'
     ];
     const jitsiSelectors = [
-      '#largeVideoContainer', '#filmstripRemoteVideos', '.videocontainer',
-      '[class*="tile-view"]', '[class*="tileView"]', '[class*="stage"]', '[class*="filmstrip"]'
+      '#largeVideoContainer',
+      '#filmstripRemoteVideos',
+      '.videocontainer',
+      '[class*="tile-view"]',
+      '[class*="tileView"]',
+      '[class*="stage"]',
+      '[class*="filmstrip"]'
     ];
     return state.provider === 'jitsi' ? jitsiSelectors : discordSelectors;
   }
 
   function findKnownCallContainer() {
-    const candidates = selectorCandidates().flatMap((selector) => [...document.querySelectorAll(selector)]).filter(isVisible);
+    const candidates = selectorCandidates()
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .filter(isVisible);
+
     return candidates.sort((a, b) => {
       const ar = a.getBoundingClientRect();
       const br = b.getBoundingClientRect();
@@ -92,21 +105,36 @@
   function elementMetadata(el) {
     const values = [];
     let node = el;
+
     for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
-      for (const name of ['aria-label', 'title', 'data-list-item-id', 'data-testid', 'data-video-type', 'data-track-type', 'data-source-type']) {
+      for (const name of [
+        'aria-label',
+        'title',
+        'data-list-item-id',
+        'data-testid',
+        'data-video-type',
+        'data-track-type',
+        'data-source-type'
+      ]) {
         const value = node.getAttribute?.(name);
         if (value) values.push(value);
       }
+
       if (typeof node.className === 'string') values.push(node.className);
+
       if (node.dataset) {
-        for (const value of Object.values(node.dataset)) if (typeof value === 'string') values.push(value);
+        for (const value of Object.values(node.dataset)) {
+          if (typeof value === 'string') values.push(value);
+        }
       }
     }
+
     return values.join(' ').toLowerCase();
   }
 
   function jitsiDesktopTrackIds() {
     const ids = new Set();
+
     try {
       const redux = window.APP?.store?.getState?.();
       const tracks = redux?.['features/base/tracks'];
@@ -114,7 +142,10 @@
 
       for (const entry of tracks) {
         const jt = entry?.jitsiTrack;
-        const videoType = String(entry?.videoType || jt?.videoType || jt?.getVideoType?.() || '').toLowerCase();
+        const videoType = String(
+          entry?.videoType || jt?.videoType || jt?.getVideoType?.() || ''
+        ).toLowerCase();
+
         if (videoType !== 'desktop') continue;
 
         const mediaTrack = jt?.getTrack?.() || jt?.track;
@@ -126,14 +157,17 @@
         if (jt?.sourceName) ids.add(String(jt.sourceName));
       }
     } catch (_) {}
+
     return ids;
   }
 
   function matchesJitsiDesktopTrack(video, desktopIds) {
     if (!desktopIds.size) return false;
+
     try {
       const stream = video.srcObject;
       if (stream?.id && desktopIds.has(stream.id)) return true;
+
       for (const track of stream?.getVideoTracks?.() || []) {
         if (desktopIds.has(track.id)) return true;
       }
@@ -159,32 +193,60 @@
       .slice(0, MAX_CAPTURE_STREAMS * 2);
 
     if (!videos.length) return [];
-    const desktopIds = state.provider === 'jitsi' ? jitsiDesktopTrackIds() : new Set();
-    const screenShares = videos.filter((video) => isLikelyScreenShare(video, desktopIds));
 
-    if (screenShares.length) return screenShares.slice(0, MAX_CAPTURE_STREAMS);
-    if (state.provider === 'discord') return videos.slice(0, MAX_CAPTURE_STREAMS);
-    return [];
+    const desktopIds = state.provider === 'jitsi' ? jitsiDesktopTrackIds() : new Set();
+    return videos
+      .filter((video) => isLikelyScreenShare(video, desktopIds))
+      .slice(0, MAX_CAPTURE_STREAMS);
   }
 
   function tryEnableGridView() {
     const patterns = state.provider === 'jitsi'
       ? [/tile view/i, /tileview/i, /타일/i, /격자/i, /그리드/i]
       : [/grid/i, /gallery/i, /격자/i, /그리드/i, /갤러리/i];
+
     const buttons = [...document.querySelectorAll('button,[role="button"]')];
     const target = buttons.find((button) => {
-      const text = [button.getAttribute('aria-label'), button.getAttribute('title'), button.textContent]
-        .filter(Boolean).join(' ');
+      const text = [
+        button.getAttribute('aria-label'),
+        button.getAttribute('title'),
+        button.textContent
+      ].filter(Boolean).join(' ');
       return patterns.some((pattern) => pattern.test(text));
     });
-    if (target && isVisible(target)) {
-      try { target.click(); } catch (_) {}
+
+    if (!target || !isVisible(target)) return;
+
+    const pressed = target.getAttribute('aria-pressed');
+    const stateValue = target.getAttribute('data-state');
+    const text = [
+      target.getAttribute('aria-label'),
+      target.getAttribute('title'),
+      target.textContent
+    ].filter(Boolean).join(' ');
+
+    const definitelyOn = pressed === 'true' || stateValue === 'on' || stateValue === 'active';
+    const definitelyOff = pressed === 'false' || stateValue === 'off' || stateValue === 'inactive';
+    const looksLikeExit = /(exit|leave|disable|turn off|끄기|종료|나가기)/i.test(text);
+
+    if (definitelyOn || looksLikeExit) return;
+
+    if (definitelyOff) {
+      try {
+        target.click();
+      } catch (_) {}
     }
   }
 
   function clearRoot() {
-    if (state.callRoot?.isConnected) state.callRoot.removeAttribute('data-dgv-call-root');
-    document.querySelectorAll('[data-dgv-call-root="true"]').forEach((el) => el.removeAttribute('data-dgv-call-root'));
+    if (state.callRoot?.isConnected) {
+      state.callRoot.removeAttribute('data-dgv-call-root');
+    }
+
+    document.querySelectorAll('[data-dgv-call-root="true"]').forEach((el) => {
+      el.removeAttribute('data-dgv-call-root');
+    });
+
     state.callRoot = null;
   }
 
@@ -192,6 +254,7 @@
     if (!state.focus) return;
     const root = findCallRoot();
     clearRoot();
+
     if (root) {
       state.callRoot = root;
       root.setAttribute('data-dgv-call-root', 'true');
@@ -212,6 +275,7 @@
       canvas = document.createElement('canvas');
       state.captureCanvases.set(video, canvas);
     }
+
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
     return canvas;
@@ -221,12 +285,14 @@
     const sourceWidth = video.videoWidth;
     const sourceHeight = video.videoHeight;
     if (!sourceWidth || !sourceHeight) return null;
+
     const scale = Math.min(1, MAX_CAPTURE_WIDTH / sourceWidth, MAX_CAPTURE_HEIGHT / sourceHeight);
     const width = Math.max(2, Math.round(sourceWidth * scale));
     const height = Math.max(2, Math.round(sourceHeight * scale));
     const canvas = canvasForVideo(video, width, height);
     const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
     if (!context) return null;
+
     try {
       context.drawImage(video, 0, 0, width, height);
       return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
@@ -238,18 +304,21 @@
   function pruneCaptureCanvases(activeVideos) {
     const active = new Set(activeVideos);
     for (const video of state.captureCanvases.keys()) {
-      if (!active.has(video) || !video.isConnected) state.captureCanvases.delete(video);
+      if (!active.has(video) || !video.isConnected) {
+        state.captureCanvases.delete(video);
+      }
     }
   }
 
   function capturePiPFrames() {
     if (!state.pipCapture || state.pipCaptureBusy) return;
     state.pipCaptureBusy = true;
+
     try {
       const videos = getPiPSourceVideos();
       pruneCaptureCanvases(videos);
       const frames = videos.map(encodeVideoFrame).filter(Boolean);
-      api?.sendPiPFrames(frames);
+      api.sendPiPFrames?.(frames);
     } finally {
       state.pipCaptureBusy = false;
     }
@@ -258,6 +327,7 @@
   function schedulePiPCapture(immediate = false) {
     clearTimeout(state.pipCaptureTimer);
     if (!state.pipCapture) return;
+
     state.pipCaptureTimer = setTimeout(() => {
       capturePiPFrames();
       schedulePiPCapture(false);
@@ -268,6 +338,7 @@
     state.pipCapture = Boolean(enabled);
     state.pipOpen = state.pipCapture;
     updatePiPButton();
+
     if (state.pipCapture) {
       tryEnableGridView();
       schedulePiPCapture(true);
@@ -277,11 +348,12 @@
       state.pipCaptureBusy = false;
       state.captureCanvases.clear();
     }
+
     return state.pipCapture;
   }
 
   async function togglePiP() {
-    const open = await api?.togglePiP();
+    const open = await api.togglePiP?.();
     state.pipOpen = Boolean(open);
     updatePiPButton();
     return state.pipOpen;
@@ -290,18 +362,29 @@
   function updatePiPButton() {
     const button = document.getElementById('dgv-pip-launcher');
     if (!button) return;
-    button.textContent = state.pipOpen ? '▣ PiP 닫기' : '▣ PiP 분할';
-    button.setAttribute('aria-pressed', state.pipOpen ? 'true' : 'false');
+
+    const text = state.pipOpen ? '▣ PiP 닫기' : '▣ PiP 분할';
+    if (button.textContent !== text) button.textContent = text;
+
+    const pressed = state.pipOpen ? 'true' : 'false';
+    if (button.getAttribute('aria-pressed') !== pressed) {
+      button.setAttribute('aria-pressed', pressed);
+    }
   }
 
   function updateProviderUI() {
+    const label = state.provider === 'jitsi' ? 'Jitsi' : 'Discord';
+
     const empty = document.getElementById('dgv-no-stream');
-    if (empty) {
-      const label = state.provider === 'jitsi' ? 'Jitsi' : 'Discord';
-      empty.innerHTML = `<div><strong>공유화면을 찾는 중</strong><span>${label}에서 화면공유를 시청한 뒤 다시 확인해주세요.</span></div>`;
+    if (empty && empty.dataset.dgvProvider !== state.provider) {
+      empty.dataset.dgvProvider = state.provider;
+      empty.innerHTML = `<div><strong>공유화면을 찾는 중</strong><span>${label}에서 공유화면을 찾지 못했습니다. 카메라 영상은 PiP에 넣지 않습니다.</span></div>`;
     }
+
     const badge = document.getElementById('dgv-provider-badge');
-    if (badge) badge.textContent = state.provider === 'jitsi' ? 'Jitsi' : 'Discord';
+    if (badge && badge.textContent !== label) {
+      badge.textContent = label;
+    }
   }
 
   function ensureControls() {
@@ -313,7 +396,7 @@
       home.type = 'button';
       home.textContent = '⌂ 서비스 선택';
       home.title = 'Discord / Jitsi 선택 화면으로 돌아가기';
-      home.addEventListener('click', () => api?.goHome?.());
+      home.addEventListener('click', () => api.goHome?.());
       document.body.appendChild(home);
     }
 
@@ -328,8 +411,8 @@
       launcher.id = 'dgv-launcher';
       launcher.type = 'button';
       launcher.textContent = '▦ 화면만 보기';
-      launcher.title = '공유화면만 전체창으로 보기 (F10)';
-      launcher.addEventListener('click', () => api?.setFocus(true));
+      launcher.title = '공유화면 영역만 전체창으로 보기 (F10)';
+      launcher.addEventListener('click', () => api.setFocus?.(true));
       document.body.appendChild(launcher);
     }
 
@@ -347,13 +430,15 @@
     if (!document.getElementById('dgv-focus-hotspot')) {
       const hotspot = document.createElement('div');
       hotspot.id = 'dgv-focus-hotspot';
+
       const exit = document.createElement('button');
       exit.id = 'dgv-focus-exit';
       exit.type = 'button';
       exit.textContent = '×';
       exit.title = '화면만 보기 종료 (F10 또는 Esc)';
       exit.setAttribute('aria-label', '화면만 보기 종료');
-      exit.addEventListener('click', () => api?.setFocus(false));
+      exit.addEventListener('click', () => api.setFocus?.(false));
+
       hotspot.appendChild(exit);
       document.body.appendChild(hotspot);
     }
@@ -363,12 +448,14 @@
       empty.id = 'dgv-no-stream';
       document.body.appendChild(empty);
     }
+
     updateProviderUI();
   }
 
   async function setFocusMode(enabled) {
     state.focus = Boolean(enabled);
     ensureControls();
+
     if (state.focus) {
       tryEnableGridView();
       document.body.classList.add('dgv-focus-mode');
@@ -377,6 +464,7 @@
       document.body.classList.remove('dgv-focus-mode', 'dgv-no-stream');
       clearRoot();
     }
+
     return state.focus;
   }
 
@@ -384,6 +472,7 @@
     state.provider = provider === 'jitsi' ? 'jitsi' : 'discord';
     document.body?.setAttribute('data-dgv-provider', state.provider);
     updateProviderUI();
+
     if (state.focus) scheduleRefresh();
     if (state.pipCapture) schedulePiPCapture(true);
     return state.provider;
@@ -393,18 +482,30 @@
     ensureControls();
     if (state.focus) scheduleRefresh();
   });
+
   state.observer.observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener('resize', scheduleRefresh, { passive: true });
 
-  window.__DGV__ = { setProvider, setFocusMode, refreshRoot, setPiPCapture, capturePiPFrames };
+  window.__DGV__ = {
+    setProvider,
+    setFocusMode,
+    refreshRoot,
+    setPiPCapture,
+    capturePiPFrames
+  };
 
   ensureControls();
-  api?.onPiPState((open) => {
+
+  api.onPiPState?.((open) => {
     state.pipOpen = Boolean(open);
     updatePiPButton();
   });
 
-  Promise.all([api?.getProvider?.(), api?.getFocus(), api?.getPiP()]).then(([provider, focus, pip]) => {
+  Promise.all([
+    api.getProvider?.(),
+    api.getFocus?.(),
+    api.getPiP?.()
+  ]).then(([provider, focus, pip]) => {
     setProvider(provider);
     setFocusMode(Boolean(focus));
     state.pipOpen = Boolean(pip);
