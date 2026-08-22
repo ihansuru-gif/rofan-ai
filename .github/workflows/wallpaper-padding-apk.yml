@@ -21,7 +21,7 @@ jobs:
       - name: Reconstruct project archive
         shell: bash
         run: |
-          cat .build/wallpaper-padding/part*.txt | base64 --decode > WallpaperPadding-source.zip
+          cp .build/wallpaper-padding/source.zip WallpaperPadding-source.zip
           unzip -q WallpaperPadding-source.zip
           test -f WallpaperPadding/settings.gradle
 
@@ -30,6 +30,30 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Core QA pass x3
+        shell: bash
+        run: |
+          mkdir -p qa-classes
+          javac -d qa-classes \
+            WallpaperPadding/app/src/main/java/com/ihansuru/wallpaperpadding/ImageLayoutCalculator.java \
+            WallpaperPadding/app/src/main/java/com/ihansuru/wallpaperpadding/DecodeSizeCalculator.java \
+            WallpaperPadding/tools/LayoutCalculatorTest.java \
+            WallpaperPadding/tools/DecodeSizeCalculatorTest.java \
+            WallpaperPadding/tools/ExpectedScenarioTest.java
+          for seed in 1101 2202 3303; do
+            java -cp qa-classes LayoutCalculatorTest "$seed" 100000
+          done
+          for n in 1 2 3; do
+            java -cp qa-classes DecodeSizeCalculatorTest
+          done
+
+      - name: Expected scenarios x3
+        shell: bash
+        run: |
+          java -cp qa-classes ExpectedScenarioTest normal
+          java -cp qa-classes ExpectedScenarioTest edge
+          java -cp qa-classes ExpectedScenarioTest memory
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -49,9 +73,17 @@ jobs:
         working-directory: WallpaperPadding
         run: gradle --no-daemon :app:assembleDebug
 
+      - name: APK archive check x3
+        shell: bash
+        run: |
+          APK=WallpaperPadding/app/build/outputs/apk/debug/app-debug.apk
+          file "$APK" | grep -q 'Android package'
+          for n in 1 2 3; do unzip -t "$APK" >/dev/null; done
+          sha256sum "$APK"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WallpaperPadding-debug-apk
+          name: WallpaperPadding-v1.0.1-debug-apk
           path: WallpaperPadding/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
