@@ -1,44 +1,63 @@
 #dgv-launcher,
 #dgv-pip-launcher,
+#dgv-home-launcher,
 #dgv-focus-hotspot,
-#dgv-focus-exit {
+#dgv-focus-exit,
+#dgv-provider-badge {
   box-sizing: border-box !important;
   font-family: "Segoe UI", system-ui, sans-serif !important;
 }
 
 #dgv-launcher,
-#dgv-pip-launcher {
+#dgv-pip-launcher,
+#dgv-home-launcher {
   position: fixed !important;
-  bottom: 18px !important;
   z-index: 2147483647 !important;
   display: flex !important;
-  gap: 8px !important;
   align-items: center !important;
-  padding: 10px 14px !important;
-  min-height: 44px !important;
+  justify-content: center !important;
+  min-height: 42px !important;
+  padding: 9px 13px !important;
   border: 1px solid rgba(255,255,255,.14) !important;
-  border-radius: 12px !important;
+  border-radius: 11px !important;
   color: #fff !important;
   background: rgba(20,22,26,.94) !important;
-  box-shadow: 0 10px 30px rgba(0,0,0,.35) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,.3) !important;
   cursor: pointer !important;
-  font-size: 14px !important;
+  font-size: 13px !important;
   font-weight: 700 !important;
 }
 
-#dgv-launcher { right: 18px !important; }
-#dgv-pip-launcher { right: 164px !important; }
+#dgv-launcher { right: 18px !important; bottom: 18px !important; }
+#dgv-pip-launcher { right: 164px !important; bottom: 18px !important; }
+#dgv-home-launcher { left: 18px !important; top: 18px !important; }
 
 #dgv-launcher:hover,
-#dgv-pip-launcher:hover { background: rgba(36,39,45,.98) !important; }
+#dgv-pip-launcher:hover,
+#dgv-home-launcher:hover { background: rgba(36,39,45,.98) !important; }
 
 #dgv-pip-launcher[aria-pressed="true"] {
-  border-color: rgba(255,255,255,.28) !important;
+  border-color: rgba(255,255,255,.3) !important;
   background: rgba(50,53,61,.98) !important;
 }
 
+#dgv-provider-badge {
+  position: fixed !important;
+  top: 28px !important;
+  left: 140px !important;
+  z-index: 2147483646 !important;
+  padding: 4px 8px !important;
+  border-radius: 999px !important;
+  color: rgba(255,255,255,.7) !important;
+  background: rgba(0,0,0,.5) !important;
+  font-size: 11px !important;
+  pointer-events: none !important;
+}
+
 body.dgv-focus-mode #dgv-launcher,
-body.dgv-focus-mode #dgv-pip-launcher { display: none !important; }
+body.dgv-focus-mode #dgv-pip-launcher,
+body.dgv-focus-mode #dgv-home-launcher,
+body.dgv-focus-mode #dgv-provider-badge { display: none !important; }
 
 [data-dgv-call-root="true"] {
   position: fixed !important;
@@ -62,7 +81,10 @@ body.dgv-focus-mode [data-dgv-call-root="true"] [class*="controls_"],
 body.dgv-focus-mode [data-dgv-call-root="true"] [class*="controlButton_"],
 body.dgv-focus-mode [data-dgv-call-root="true"] [class*="actionRow_"],
 body.dgv-focus-mode [data-dgv-call-root="true"] [class*="participantsButton_"],
-body.dgv-focus-mode [data-dgv-call-root="true"] [class*="sidebar_"] {
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="sidebar_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="toolbox"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [id*="toolbox"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="filmstrip__toolbar"] {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -79,7 +101,6 @@ body.dgv-focus-mode [data-dgv-call-root="true"] [class*="sidebar_"] {
   justify-content: flex-end !important;
   padding: 8px !important;
 }
-
 body.dgv-focus-mode #dgv-focus-hotspot { display: flex !important; }
 
 #dgv-focus-exit {
@@ -95,7 +116,6 @@ body.dgv-focus-mode #dgv-focus-hotspot { display: flex !important; }
   line-height: 1 !important;
   transition: opacity .12s ease !important;
 }
-
 #dgv-focus-hotspot:hover #dgv-focus-exit,
 #dgv-focus-exit:focus-visible { opacity: 1 !important; }
 
@@ -111,7 +131,6 @@ body.dgv-focus-mode #dgv-focus-hotspot { display: flex !important; }
   text-align: center !important;
   font-family: "Segoe UI", system-ui, sans-serif !important;
 }
-
 body.dgv-focus-mode.dgv-no-stream #dgv-no-stream { display: grid !important; }
 #dgv-no-stream strong { display:block !important; font-size:20px !important; margin-bottom:8px !important; }
 #dgv-no-stream span { color:#aeb4bd !important; font-size:14px !important; }

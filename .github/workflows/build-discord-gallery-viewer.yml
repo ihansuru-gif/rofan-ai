@@ -1,4 +1,4 @@
-name: Build Discord Gallery Viewer
+name: Build Screen Share Gallery
 
 on:
   workflow_dispatch:
@@ -29,12 +29,19 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Check JavaScript syntax
+        run: |
+          node --check main.js
+          node --check preload.js
+          node --check inject.js
+          node --check pip-preload.js
+
       - name: Build portable EXE
         run: npm run dist
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Discord-Gallery-Viewer-Windows-x64
+          name: Screen-Share-Gallery-Windows-x64
           path: DiscordGalleryViewer/dist/*.exe
           if-no-files-found: error

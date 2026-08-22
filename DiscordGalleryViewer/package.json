@@ -1,7 +1,7 @@
 {
-  "name": "discord-gallery-viewer",
-  "version": "0.2.0",
-  "description": "Discord screen-share gallery viewer with chat-free full-screen and always-on-top split PiP modes.",
+  "name": "screen-share-gallery",
+  "version": "0.3.0",
+  "description": "Discord and Jitsi screen-share gallery viewer with chat-free full-screen and always-on-top split PiP modes.",
   "main": "main.js",
   "author": "ihansuru-gif",
   "license": "MIT",
@@ -15,8 +15,8 @@
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "kr.ihansuru.discordgalleryviewer",
-    "productName": "Discord Gallery Viewer",
+    "appId": "kr.ihansuru.screensharegallery",
+    "productName": "Screen Share Gallery",
     "asar": true,
     "files": [
       "main.js",
@@ -28,16 +28,9 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
-      ],
-      "artifactName": "Discord-Gallery-Viewer-${version}-Windows-${arch}.${ext}"
+      "target": [{ "target": "portable", "arch": ["x64"] }],
+      "artifactName": "Screen-Share-Gallery-${version}-Windows-${arch}.${ext}"
     },
-    "directories": {
-      "output": "dist"
-    }
+    "directories": { "output": "dist" }
   }
 }
