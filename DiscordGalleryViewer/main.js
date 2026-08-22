@@ -4,23 +4,30 @@ const path = require('path');
 
 const DISCORD_URL = 'https://discord.com/app';
 let mainWindow = null;
+let pipWindow = null;
 let focusMode = false;
+let pipCaptureEnabled = false;
 
 function readAsset(name) {
   return fs.readFileSync(path.join(__dirname, name), 'utf8');
 }
 
 function discordUserAgent() {
-  const chrome = process.versions.chrome || '140.0.0.0';
+  const chrome = process.versions.chrome || '150.0.0.0';
   return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
 }
 
+function isUsable(win) {
+  return Boolean(win && !win.isDestroyed());
+}
+
 async function injectViewer() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!isUsable(mainWindow)) return;
   try {
     await mainWindow.webContents.insertCSS(readAsset('focus.css'), { cssOrigin: 'user' });
     await mainWindow.webContents.executeJavaScript(readAsset('inject.js'), true);
     await setFocusMode(focusMode);
+    await setPiPCapture(pipCaptureEnabled);
   } catch (error) {
     console.error('[DGV] injection failed:', error);
   }
@@ -28,7 +35,7 @@ async function injectViewer() {
 
 async function setFocusMode(enabled) {
   focusMode = Boolean(enabled);
-  if (!mainWindow || mainWindow.isDestroyed()) return focusMode;
+  if (!isUsable(mainWindow)) return focusMode;
 
   try {
     await mainWindow.webContents.executeJavaScript(
@@ -39,6 +46,102 @@ async function setFocusMode(enabled) {
     console.error('[DGV] focus toggle failed:', error);
   }
   return focusMode;
+}
+
+async function setPiPCapture(enabled) {
+  pipCaptureEnabled = Boolean(enabled);
+  if (!isUsable(mainWindow)) return pipCaptureEnabled;
+
+  try {
+    await mainWindow.webContents.executeJavaScript(
+      `window.__DGV__ && window.__DGV__.setPiPCapture(${JSON.stringify(pipCaptureEnabled)});`,
+      true
+    );
+  } catch (error) {
+    console.error('[DGV] PiP capture toggle failed:', error);
+  }
+  return pipCaptureEnabled;
+}
+
+function notifyPiPState() {
+  if (isUsable(mainWindow)) {
+    mainWindow.webContents.send('dgv:pip-state', isUsable(pipWindow));
+  }
+}
+
+async function createPiPWindow() {
+  if (isUsable(pipWindow)) {
+    pipWindow.show();
+    pipWindow.focus();
+    return true;
+  }
+
+  pipWindow = new BrowserWindow({
+    width: 720,
+    height: 405,
+    minWidth: 320,
+    minHeight: 180,
+    frame: false,
+    resizable: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: '#000000',
+    show: false,
+    title: 'Discord Gallery Viewer - PiP',
+    webPreferences: {
+      preload: path.join(__dirname, 'pip-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false
+    }
+  });
+
+  pipWindow.setAlwaysOnTop(true, 'floating');
+  pipWindow.setMenuBarVisibility(false);
+
+  pipWindow.once('ready-to-show', () => {
+    if (isUsable(pipWindow)) pipWindow.showInactive();
+  });
+
+  pipWindow.on('closed', () => {
+    pipWindow = null;
+    setPiPCapture(false);
+    notifyPiPState();
+  });
+
+  await pipWindow.loadFile(path.join(__dirname, 'pip.html'));
+  await setPiPCapture(true);
+  notifyPiPState();
+  return true;
+}
+
+function closePiPWindow() {
+  if (isUsable(pipWindow)) {
+    pipWindow.close();
+  } else {
+    pipWindow = null;
+    setPiPCapture(false);
+    notifyPiPState();
+  }
+  return false;
+}
+
+async function togglePiPWindow() {
+  if (isUsable(pipWindow)) return closePiPWindow();
+  return createPiPWindow();
+}
+
+function sanitizeFrameBatch(payload) {
+  const input = Array.isArray(payload) ? payload : [];
+  return input.slice(0, 12).filter((frame) => {
+    return typeof frame === 'string' &&
+      frame.length <= 1_500_000 &&
+      /^data:image\/jpeg;base64,/i.test(frame);
+  });
 }
 
 function createWindow() {
@@ -57,6 +160,7 @@ function createWindow() {
       sandbox: true,
       spellcheck: false,
       webSecurity: true,
+      backgroundThrottling: false,
       partition: 'persist:discord-gallery-viewer'
     }
   });
@@ -111,6 +215,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    if (isUsable(pipWindow)) pipWindow.close();
     mainWindow = null;
   });
 
@@ -120,8 +225,22 @@ function createWindow() {
 ipcMain.handle('dgv:toggle-focus', () => setFocusMode(!focusMode));
 ipcMain.handle('dgv:set-focus', (_event, enabled) => setFocusMode(enabled));
 ipcMain.handle('dgv:get-focus', () => focusMode);
+ipcMain.handle('dgv:toggle-pip', (event) => {
+  if (!isUsable(mainWindow) || event.sender !== mainWindow.webContents) return false;
+  return togglePiPWindow();
+});
+ipcMain.handle('dgv:get-pip', () => isUsable(pipWindow));
 ipcMain.handle('dgv:reload', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload();
+  if (isUsable(mainWindow)) mainWindow.webContents.reload();
+});
+
+ipcMain.on('dgv:pip-frames', (event, frames) => {
+  if (!isUsable(mainWindow) || event.sender !== mainWindow.webContents || !isUsable(pipWindow)) return;
+  pipWindow.webContents.send('dgv:pip-frames', sanitizeFrameBatch(frames));
+});
+
+ipcMain.on('dgv:pip-close', (event) => {
+  if (isUsable(pipWindow) && event.sender === pipWindow.webContents) closePiPWindow();
 });
 
 app.whenReady().then(() => {

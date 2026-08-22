@@ -1,7 +1,7 @@
 {
   "name": "discord-gallery-viewer",
-  "version": "0.1.0",
-  "description": "Discord screen-share gallery viewer with a clean, chat-free viewing mode.",
+  "version": "0.2.0",
+  "description": "Discord screen-share gallery viewer with chat-free full-screen and always-on-top split PiP modes.",
   "main": "main.js",
   "author": "ihansuru-gif",
   "license": "MIT",
@@ -23,6 +23,8 @@
       "preload.js",
       "inject.js",
       "focus.css",
+      "pip.html",
+      "pip-preload.js",
       "package.json"
     ],
     "win": {

@@ -6,66 +6,18 @@
     observer: null,
     refreshTimer: null,
     callRoot: null,
-    pipWindow: null,
-    pipTimer: null,
-    pipEntries: new Map(),
-    pipExpandedSource: null
+    pipCapture: false,
+    pipCaptureTimer: null,
+    pipCaptureBusy: false,
+    captureCanvases: new Map(),
+    pipOpen: false
   };
 
-  const PIP_CSS = `
-    * { box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #000;
-      color: #fff;
-      font-family: "Segoe UI", system-ui, sans-serif;
-    }
-    #dgv-pip-grid {
-      width: 100%;
-      height: 100%;
-      display: grid;
-      grid-template-columns: repeat(var(--dgv-cols, 2), minmax(0, 1fr));
-      grid-template-rows: repeat(var(--dgv-rows, 2), minmax(0, 1fr));
-      gap: 2px;
-      background: #090a0c;
-    }
-    .dgv-pip-tile {
-      min-width: 0;
-      min-height: 0;
-      position: relative;
-      overflow: hidden;
-      background: #000;
-      cursor: pointer;
-    }
-    .dgv-pip-tile video {
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      background: #000;
-    }
-    #dgv-pip-grid[data-expanded="true"] .dgv-pip-tile { display: none; }
-    #dgv-pip-grid[data-expanded="true"] .dgv-pip-tile[data-expanded="true"] {
-      display: block;
-      grid-column: 1 / -1;
-      grid-row: 1 / -1;
-    }
-    #dgv-pip-empty {
-      display: none;
-      position: absolute;
-      inset: 0;
-      place-items: center;
-      padding: 20px;
-      text-align: center;
-      color: #aeb4bd;
-      font-size: 13px;
-      background: #0b0d10;
-    }
-    body.dgv-pip-no-stream #dgv-pip-empty { display: grid; }
-  `;
+  const CAPTURE_INTERVAL_MS = 160;
+  const MAX_CAPTURE_WIDTH = 480;
+  const MAX_CAPTURE_HEIGHT = 270;
+  const MAX_CAPTURE_STREAMS = 12;
+  const JPEG_QUALITY = 0.72;
 
   function isVisible(el) {
     if (!el || !el.isConnected) return false;
@@ -147,11 +99,13 @@
 
   function getPiPSourceVideos() {
     const root = findCallRoot() || document;
-    const videos = getVisibleVideos(root).filter((video) => video.readyState >= 2 || video.videoWidth > 0);
-    if (!videos.length) return [];
+    const videos = getVisibleVideos(root)
+      .filter((video) => video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0)
+      .slice(0, MAX_CAPTURE_STREAMS);
 
+    if (!videos.length) return [];
     const screenShares = videos.filter(isLikelyScreenShare);
-    return screenShares.length ? screenShares : videos;
+    return (screenShares.length ? screenShares : videos).slice(0, MAX_CAPTURE_STREAMS);
   }
 
   function tryEnableGridView() {
@@ -198,227 +152,100 @@
   function scheduleRefresh() {
     clearTimeout(state.refreshTimer);
     state.refreshTimer = setTimeout(refreshRoot, 120);
-    if (state.pipWindow && !state.pipWindow.closed) schedulePiPRefresh();
   }
 
-  function gridShape(count) {
-    if (count <= 1) return [1, 1];
-    if (count === 2) return [2, 1];
-    if (count <= 4) return [2, 2];
-    if (count <= 6) return [3, 2];
-    if (count <= 9) return [3, 3];
-    const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
-    return [cols, rows];
-  }
-
-  function sourceForMirror(source) {
-    if (source.srcObject instanceof MediaStream) {
-      return { type: 'stream', value: source.srcObject };
+  function canvasForVideo(video, width, height) {
+    let canvas = state.captureCanvases.get(video);
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      state.captureCanvases.set(video, canvas);
     }
-
-    if (typeof source.captureStream === 'function') {
-      try {
-        const captured = source.captureStream();
-        if (captured && captured.getVideoTracks().length) {
-          return { type: 'stream', value: captured };
-        }
-      } catch (_) {}
-    }
-
-    const src = source.currentSrc || source.src;
-    if (src) return { type: 'src', value: src };
-    return null;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    return canvas;
   }
 
-  function createPiPTile(source) {
-    const doc = state.pipWindow.document;
-    const tile = doc.createElement('div');
-    tile.className = 'dgv-pip-tile';
-    tile.tabIndex = 0;
-    tile.setAttribute('role', 'button');
-    tile.setAttribute('aria-label', '공유화면 확대/분할 전환');
+  function encodeVideoFrame(video) {
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+    if (!sourceWidth || !sourceHeight) return null;
 
-    const mirror = doc.createElement('video');
-    mirror.autoplay = true;
-    mirror.muted = true;
-    mirror.playsInline = true;
-    mirror.disablePictureInPicture = true;
-    mirror.setAttribute('aria-hidden', 'true');
-
-    const media = sourceForMirror(source);
-    if (media?.type === 'stream') mirror.srcObject = media.value;
-    if (media?.type === 'src') mirror.src = media.value;
-
-    tile.appendChild(mirror);
-    tile.addEventListener('click', () => toggleExpandedTile(source));
-    tile.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        toggleExpandedTile(source);
-      }
-    });
-
-    mirror.play().catch(() => {});
-    return { tile, mirror, media };
-  }
-
-  function toggleExpandedTile(source) {
-    state.pipExpandedSource = state.pipExpandedSource === source ? null : source;
-    applyPiPExpandedState();
-  }
-
-  function applyPiPExpandedState() {
-    if (!state.pipWindow || state.pipWindow.closed) return;
-    const grid = state.pipWindow.document.getElementById('dgv-pip-grid');
-    if (!grid) return;
-
-    const expanded = state.pipExpandedSource && state.pipEntries.has(state.pipExpandedSource)
-      ? state.pipExpandedSource
-      : null;
-
-    if (!expanded) state.pipExpandedSource = null;
-    grid.dataset.expanded = expanded ? 'true' : 'false';
-    for (const [source, entry] of state.pipEntries) {
-      entry.tile.dataset.expanded = source === expanded ? 'true' : 'false';
-    }
-  }
-
-  function refreshPiP() {
-    if (!state.pipWindow || state.pipWindow.closed) {
-      stopPiP();
-      return;
-    }
-
-    const doc = state.pipWindow.document;
-    const grid = doc.getElementById('dgv-pip-grid');
-    if (!grid) return;
-
-    const sources = getPiPSourceVideos();
-    const active = new Set(sources);
-
-    for (const [source, entry] of state.pipEntries) {
-      if (!active.has(source) || !source.isConnected) {
-        try { entry.mirror.pause(); } catch (_) {}
-        try { entry.mirror.srcObject = null; } catch (_) {}
-        entry.tile.remove();
-        state.pipEntries.delete(source);
-      }
-    }
-
-    for (const source of sources) {
-      if (!state.pipEntries.has(source)) {
-        const entry = createPiPTile(source);
-        state.pipEntries.set(source, entry);
-        grid.appendChild(entry.tile);
-      } else {
-        grid.appendChild(state.pipEntries.get(source).tile);
-      }
-    }
-
-    const count = state.pipEntries.size;
-    const [cols, rows] = gridShape(count);
-    grid.style.setProperty('--dgv-cols', String(cols));
-    grid.style.setProperty('--dgv-rows', String(rows));
-    doc.body.classList.toggle('dgv-pip-no-stream', count === 0);
-    applyPiPExpandedState();
-  }
-
-  function schedulePiPRefresh() {
-    clearTimeout(state.pipTimer);
-    state.pipTimer = setTimeout(refreshPiP, 140);
-  }
-
-  function stopPiP() {
-    clearTimeout(state.pipTimer);
-    state.pipTimer = null;
-    for (const entry of state.pipEntries.values()) {
-      try { entry.mirror.pause(); } catch (_) {}
-      try { entry.mirror.srcObject = null; } catch (_) {}
-    }
-    state.pipEntries.clear();
-    state.pipExpandedSource = null;
-    state.pipWindow = null;
-    updatePiPButton();
-  }
-
-  function buildPiPDocument(pipWindow) {
-    const doc = pipWindow.document;
-    doc.title = 'Discord Gallery Viewer - PiP';
-    doc.documentElement.lang = 'ko';
-
-    const style = doc.createElement('style');
-    style.textContent = PIP_CSS;
-    doc.head.appendChild(style);
-
-    const grid = doc.createElement('main');
-    grid.id = 'dgv-pip-grid';
-    grid.dataset.expanded = 'false';
-
-    const empty = doc.createElement('div');
-    empty.id = 'dgv-pip-empty';
-    empty.textContent = '공유화면을 찾는 중';
-
-    doc.body.append(grid, empty);
-  }
-
-  async function openPiP() {
-    if (state.pipWindow && !state.pipWindow.closed) {
-      state.pipWindow.focus();
-      return true;
-    }
-
-    if (!('documentPictureInPicture' in window)) {
-      alert('이 실행 환경에서는 분할 PiP를 지원하지 않습니다.');
-      return false;
-    }
-
-    tryEnableGridView();
+    const scale = Math.min(1, MAX_CAPTURE_WIDTH / sourceWidth, MAX_CAPTURE_HEIGHT / sourceHeight);
+    const width = Math.max(2, Math.round(sourceWidth * scale));
+    const height = Math.max(2, Math.round(sourceHeight * scale));
+    const canvas = canvasForVideo(video, width, height);
+    const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
+    if (!context) return null;
 
     try {
-      const pipWindow = await documentPictureInPicture.requestWindow({
-        width: 720,
-        height: 405,
-        disallowReturnToOpener: true
-      });
-
-      state.pipWindow = pipWindow;
-      buildPiPDocument(pipWindow);
-      pipWindow.addEventListener('pagehide', stopPiP, { once: true });
-      pipWindow.addEventListener('resize', schedulePiPRefresh, { passive: true });
-      updatePiPButton();
-      refreshPiP();
-      return true;
+      context.drawImage(video, 0, 0, width, height);
+      return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
     } catch (error) {
-      console.error('[DGV] PiP open failed:', error);
-      updatePiPButton('PiP 열기 실패');
-      setTimeout(updatePiPButton, 1800);
-      return false;
+      console.warn('[DGV] frame capture failed:', error);
+      return null;
     }
   }
 
-  function closePiP() {
-    if (state.pipWindow && !state.pipWindow.closed) {
-      state.pipWindow.close();
-    } else {
-      stopPiP();
+  function pruneCaptureCanvases(activeVideos) {
+    const active = new Set(activeVideos);
+    for (const video of state.captureCanvases.keys()) {
+      if (!active.has(video) || !video.isConnected) state.captureCanvases.delete(video);
     }
+  }
+
+  function capturePiPFrames() {
+    if (!state.pipCapture || state.pipCaptureBusy) return;
+    state.pipCaptureBusy = true;
+
+    try {
+      const videos = getPiPSourceVideos();
+      pruneCaptureCanvases(videos);
+      const frames = videos.map(encodeVideoFrame).filter(Boolean);
+      window.discordGallery?.sendPiPFrames(frames);
+    } finally {
+      state.pipCaptureBusy = false;
+    }
+  }
+
+  function schedulePiPCapture(immediate = false) {
+    clearTimeout(state.pipCaptureTimer);
+    if (!state.pipCapture) return;
+
+    state.pipCaptureTimer = setTimeout(() => {
+      capturePiPFrames();
+      schedulePiPCapture(false);
+    }, immediate ? 0 : CAPTURE_INTERVAL_MS);
+  }
+
+  function setPiPCapture(enabled) {
+    state.pipCapture = Boolean(enabled);
+    state.pipOpen = state.pipCapture;
+    updatePiPButton();
+
+    if (state.pipCapture) {
+      tryEnableGridView();
+      schedulePiPCapture(true);
+    } else {
+      clearTimeout(state.pipCaptureTimer);
+      state.pipCaptureTimer = null;
+      state.pipCaptureBusy = false;
+      state.captureCanvases.clear();
+    }
+    return state.pipCapture;
   }
 
   async function togglePiP() {
-    if (state.pipWindow && !state.pipWindow.closed) {
-      closePiP();
-      return false;
-    }
-    return openPiP();
+    const open = await window.discordGallery?.togglePiP();
+    state.pipOpen = Boolean(open);
+    updatePiPButton();
+    return state.pipOpen;
   }
 
-  function updatePiPButton(temporaryText = null) {
+  function updatePiPButton() {
     const button = document.getElementById('dgv-pip-launcher');
     if (!button) return;
-    const open = Boolean(state.pipWindow && !state.pipWindow.closed);
-    button.textContent = temporaryText || (open ? '▣ PiP 닫기' : '▣ PiP 분할');
-    button.setAttribute('aria-pressed', open ? 'true' : 'false');
+    button.textContent = state.pipOpen ? '▣ PiP 닫기' : '▣ PiP 분할';
+    button.setAttribute('aria-pressed', state.pipOpen ? 'true' : 'false');
   }
 
   function ensureControls() {
@@ -438,7 +265,7 @@
       const pip = document.createElement('button');
       pip.id = 'dgv-pip-launcher';
       pip.type = 'button';
-      pip.title = '분할된 공유화면만 항상 위 PiP 창으로 분리';
+      pip.title = '분할된 공유화면만 항상 위 PiP 창으로 분리 (F9)';
       pip.setAttribute('aria-pressed', 'false');
       pip.addEventListener('click', togglePiP);
       document.body.appendChild(pip);
@@ -485,7 +312,6 @@
   state.observer = new MutationObserver(() => {
     ensureControls();
     if (state.focus) scheduleRefresh();
-    if (state.pipWindow && !state.pipWindow.closed) schedulePiPRefresh();
   });
 
   state.observer.observe(document.documentElement, { childList: true, subtree: true });
@@ -501,12 +327,22 @@
   window.__DGV__ = {
     setFocusMode,
     refreshRoot,
-    openPiP,
-    closePiP,
-    togglePiP,
-    refreshPiP
+    setPiPCapture,
+    capturePiPFrames
   };
 
   ensureControls();
-  window.discordGallery?.getFocus().then(setFocusMode).catch(() => {});
+  window.discordGallery?.onPiPState((open) => {
+    state.pipOpen = Boolean(open);
+    updatePiPButton();
+  });
+
+  Promise.all([
+    window.discordGallery?.getFocus(),
+    window.discordGallery?.getPiP()
+  ]).then(([focus, pip]) => {
+    setFocusMode(Boolean(focus));
+    state.pipOpen = Boolean(pip);
+    updatePiPButton();
+  }).catch(() => {});
 })();

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Discord Gallery Viewer - PiP</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; background:#000; }
+    body { font-family:"Segoe UI",system-ui,sans-serif; color:#fff; user-select:none; }
+    #grid {
+      position:absolute; inset:0;
+      display:grid;
+      grid-template-columns:repeat(var(--cols, 1), minmax(0,1fr));
+      grid-template-rows:repeat(var(--rows, 1), minmax(0,1fr));
+      gap:2px; background:#08090b;
+    }
+    .tile {
+      position:relative; min-width:0; min-height:0; overflow:hidden;
+      padding:0; margin:0; border:0; background:#000; cursor:pointer;
+      -webkit-app-region:no-drag;
+    }
+    .tile:focus-visible { outline:2px solid rgba(255,255,255,.85); outline-offset:-2px; }
+    .tile img { display:block; width:100%; height:100%; object-fit:contain; background:#000; pointer-events:none; }
+    #grid[data-expanded="true"] .tile { display:none; }
+    #grid[data-expanded="true"] .tile[data-expanded="true"] { display:block; grid-column:1/-1; grid-row:1/-1; }
+    #drag-strip { position:absolute; z-index:20; top:0; left:0; right:38px; height:18px; -webkit-app-region:drag; }
+    #close {
+      position:absolute; z-index:30; top:5px; right:5px; width:28px; height:28px;
+      padding:0; border:1px solid rgba(255,255,255,.16); border-radius:8px;
+      background:rgba(0,0,0,.72); color:#fff; font-size:18px; line-height:1;
+      cursor:pointer; opacity:0; transition:opacity .12s ease; -webkit-app-region:no-drag;
+    }
+    body:hover #close, #close:focus-visible { opacity:1; }
+    #empty {
+      position:absolute; inset:0; z-index:5; display:grid; place-items:center;
+      padding:20px; color:#aeb4bd; background:#0b0d10; text-align:center; font-size:13px;
+    }
+    #empty[hidden] { display:none; }
+  </style>
+</head>
+<body>
+  <main id="grid" data-expanded="false" aria-label="Discord 공유화면 분할 보기"></main>
+  <div id="empty">공유화면을 찾는 중</div>
+  <div id="drag-strip" aria-hidden="true"></div>
+  <button id="close" type="button" aria-label="PiP 닫기" title="PiP 닫기">×</button>
+</body>
+</html>
