@@ -6,16 +6,18 @@ on:
     paths:
       - 'DiscordGalleryViewer/**'
       - '.github/workflows/build-discord-gallery-viewer.yml'
+  pull_request:
+    paths:
+      - 'DiscordGalleryViewer/**'
+      - '.github/workflows/build-discord-gallery-viewer.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: DiscordGalleryViewer
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -26,18 +28,70 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Generate deterministic lockfile if needed
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
-      - name: Check JavaScript syntax
-        run: npm run check
+      - name: Commit lockfile on branch pushes
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        shell: pwsh
+        run: |
+          $changes = git status --porcelain -- DiscordGalleryViewer/package-lock.json
+          if ($changes) {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add DiscordGalleryViewer/package-lock.json
+            git commit -m "Lock Screen Share Gallery dependencies"
+            git push
+          }
 
-      - name: Build portable EXE
+      - name: Install exact dependencies
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        run: npm ci --no-audit --no-fund
+
+      - name: JavaScript and invariant checks
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        run: npm test
+
+      - name: Production home startup smoke test
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        env:
+          ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+        run: npm run smoke:home
+
+      - name: PiP functional Electron smoke test
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        env:
+          ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
+        run: npm run smoke:ci
+
+      - name: Build portable Windows EXE
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
         run: npm run dist
 
-      - name: Upload Windows EXE
+      - name: Verify EXE and create SHA256
+        working-directory: DiscordGalleryViewer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter '*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Portable EXE was not produced.' }
+          if ($exe.Length -lt 50000000) { throw "EXE unexpectedly small: $($exe.Length) bytes" }
+          $hash = (Get-FileHash -Path $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($exe.Name)" | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+          Write-Host "EXE=$($exe.Name) SIZE=$($exe.Length) SHA256=$hash"
+
+      - name: Upload verified Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Screen-Share-Gallery-Windows-x64
-          path: DiscordGalleryViewer/dist/*.exe
+          name: Screen-Share-Gallery-1.0.0-Windows-x64
+          path: |
+            DiscordGalleryViewer/dist/*.exe
+            DiscordGalleryViewer/dist/SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Screen Share Gallery CI Smoke</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;background:#111;color:#fff;overflow:hidden}
+    .videoGrid{width:100vw;height:100vh;display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:4px}
+    .screenshare{min-width:0;min-height:0;background:#000;position:relative}
+    video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+  </style>
+</head>
+<body>
+  <main class="videoGrid" data-testid="videoGrid"></main>
+  <script>
+    (async () => {
+      const grid = document.querySelector('.videoGrid');
+      for (let i = 0; i < 4; i += 1) {
+        const wrap = document.createElement('section');
+        wrap.className = 'screenshare';
+        wrap.dataset.testid = `screenshare-${i}`;
+        wrap.dataset.sourceType = 'screenshare';
+        wrap.setAttribute('aria-label', `Screen share ${i + 1}`);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 360;
+        const ctx = canvas.getContext('2d');
+        let tick = 0;
+        const draw = () => {
+          tick += 1;
+          ctx.fillStyle = `hsl(${(i * 75 + tick * 2) % 360} 70% 35%)`;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = '#fff';
+          ctx.font = '42px Segoe UI';
+          ctx.fillText(`SCREEN ${i + 1}`, 32, 72);
+          ctx.font = '28px Segoe UI';
+          ctx.fillText(String(tick), 32, 120);
+        };
+        draw();
+        setInterval(draw, 50);
+
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.dataset.sourceType = 'screenshare';
+        video.srcObject = canvas.captureStream(15);
+        wrap.appendChild(video);
+        grid.appendChild(wrap);
+        await video.play();
+      }
+      document.body.dataset.smokeReady = 'true';
+    })().catch((error) => {
+      document.body.dataset.smokeError = error?.stack || String(error);
+    });
+  </script>
+</body>
+</html>

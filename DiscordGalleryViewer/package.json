@@ -1,15 +1,19 @@
 {
   "name": "screen-share-gallery",
-  "version": "0.3.1",
-  "description": "Discord and Jitsi screen-share gallery viewer with chat-free full-screen and always-on-top split PiP modes.",
+  "version": "1.0.0",
+  "description": "Discord and Jitsi screen-share-only gallery viewer with always-on-top split PiP.",
   "main": "main.js",
   "author": "ihansuru-gif",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "check": "node --check main.js && node --check preload.js && node --check inject.js && node --check pip-preload.js && node --check ci-home-smoke.js && node --check ci-smoke.js && node --check qa-static.js",
+    "qa": "node qa-static.js",
+    "smoke:home": "electron ci-home-smoke.js",
+    "smoke:ci": "electron ci-smoke.js",
+    "test": "npm run check && npm run qa",
     "dist": "electron-builder --win portable",
-    "pack": "electron-builder --dir",
-    "check": "node --check main.js && node --check preload.js && node --check inject.js && node --check pip-preload.js"
+    "pack": "electron-builder --dir"
   },
   "devDependencies": {
     "electron": "43.4.1",
