@@ -1,13 +1,14 @@
 #dgv-launcher,
+#dgv-pip-launcher,
 #dgv-focus-hotspot,
 #dgv-focus-exit {
   box-sizing: border-box !important;
   font-family: "Segoe UI", system-ui, sans-serif !important;
 }
 
-#dgv-launcher {
+#dgv-launcher,
+#dgv-pip-launcher {
   position: fixed !important;
-  right: 18px !important;
   bottom: 18px !important;
   z-index: 2147483647 !important;
   display: flex !important;
@@ -25,8 +26,19 @@
   font-weight: 700 !important;
 }
 
-#dgv-launcher:hover { background: rgba(36,39,45,.98) !important; }
-body.dgv-focus-mode #dgv-launcher { display: none !important; }
+#dgv-launcher { right: 18px !important; }
+#dgv-pip-launcher { right: 164px !important; }
+
+#dgv-launcher:hover,
+#dgv-pip-launcher:hover { background: rgba(36,39,45,.98) !important; }
+
+#dgv-pip-launcher[aria-pressed="true"] {
+  border-color: rgba(255,255,255,.28) !important;
+  background: rgba(50,53,61,.98) !important;
+}
+
+body.dgv-focus-mode #dgv-launcher,
+body.dgv-focus-mode #dgv-pip-launcher { display: none !important; }
 
 [data-dgv-call-root="true"] {
   position: fixed !important;
