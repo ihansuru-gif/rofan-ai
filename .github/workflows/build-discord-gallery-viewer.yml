@@ -1,0 +1,40 @@
+name: Build Discord Gallery Viewer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'DiscordGalleryViewer/**'
+      - '.github/workflows/build-discord-gallery-viewer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: DiscordGalleryViewer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build portable EXE
+        run: npm run dist
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Discord-Gallery-Viewer-Windows-x64
+          path: DiscordGalleryViewer/dist/*.exe
+          if-no-files-found: error

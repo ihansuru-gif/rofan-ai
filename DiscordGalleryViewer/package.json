@@ -1,0 +1,41 @@
+{
+  "name": "discord-gallery-viewer",
+  "version": "0.1.0",
+  "description": "Discord screen-share gallery viewer with a clean, chat-free viewing mode.",
+  "main": "main.js",
+  "author": "ihansuru-gif",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable",
+    "pack": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "39.2.7",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "kr.ihansuru.discordgalleryviewer",
+    "productName": "Discord Gallery Viewer",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "inject.js",
+      "focus.css",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Discord-Gallery-Viewer-${version}-Windows-${arch}.${ext}"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

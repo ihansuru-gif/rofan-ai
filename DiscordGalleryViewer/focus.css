@@ -1,0 +1,105 @@
+#dgv-launcher,
+#dgv-focus-hotspot,
+#dgv-focus-exit {
+  box-sizing: border-box !important;
+  font-family: "Segoe UI", system-ui, sans-serif !important;
+}
+
+#dgv-launcher {
+  position: fixed !important;
+  right: 18px !important;
+  bottom: 18px !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  padding: 10px 14px !important;
+  min-height: 44px !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  border-radius: 12px !important;
+  color: #fff !important;
+  background: rgba(20,22,26,.94) !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35) !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+#dgv-launcher:hover { background: rgba(36,39,45,.98) !important; }
+body.dgv-focus-mode #dgv-launcher { display: none !important; }
+
+[data-dgv-call-root="true"] {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  min-width: 100vw !important;
+  min-height: 100vh !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  z-index: 2147483600 !important;
+  background: #000 !important;
+}
+
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="header_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="toolbar_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="controls_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="controlButton_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="actionRow_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="participantsButton_"],
+body.dgv-focus-mode [data-dgv-call-root="true"] [class*="sidebar_"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#dgv-focus-hotspot {
+  position: fixed !important;
+  top: 0 !important;
+  right: 0 !important;
+  width: 56px !important;
+  height: 56px !important;
+  z-index: 2147483647 !important;
+  display: none !important;
+  align-items: flex-start !important;
+  justify-content: flex-end !important;
+  padding: 8px !important;
+}
+
+body.dgv-focus-mode #dgv-focus-hotspot { display: flex !important; }
+
+#dgv-focus-exit {
+  width: 40px !important;
+  height: 40px !important;
+  border: 1px solid rgba(255,255,255,.12) !important;
+  border-radius: 10px !important;
+  background: rgba(0,0,0,.72) !important;
+  color: #fff !important;
+  opacity: 0 !important;
+  cursor: pointer !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
+  transition: opacity .12s ease !important;
+}
+
+#dgv-focus-hotspot:hover #dgv-focus-exit,
+#dgv-focus-exit:focus-visible { opacity: 1 !important; }
+
+#dgv-no-stream {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483599 !important;
+  display: none !important;
+  place-items: center !important;
+  padding: 28px !important;
+  background: #0b0d10 !important;
+  color: #f4f5f6 !important;
+  text-align: center !important;
+  font-family: "Segoe UI", system-ui, sans-serif !important;
+}
+
+body.dgv-focus-mode.dgv-no-stream #dgv-no-stream { display: grid !important; }
+#dgv-no-stream strong { display:block !important; font-size:20px !important; margin-bottom:8px !important; }
+#dgv-no-stream span { color:#aeb4bd !important; font-size:14px !important; }
