@@ -7,6 +7,12 @@ on:
     paths:
       - 'StickerSheetMaker/**'
       - '.github/workflows/stickersheet-build.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'StickerSheetMaker/**'
+      - '.github/workflows/stickersheet-build.yml'
   workflow_dispatch:
 
 jobs:
