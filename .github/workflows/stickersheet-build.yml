@@ -7,6 +7,8 @@ on:
     paths:
       - 'StickerSheetMaker/**'
       - '.github/workflows/stickersheet-build.yml'
+      - '.github/scripts/stickersheet-emulator-smoke.sh'
+      - '.github/scripts/stickersheet-emulator-smoke.sh'
   pull_request:
     branches:
       - main
@@ -92,21 +94,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -eux
-            trap 'adb logcat -d > StickerSheetMaker-emulator-logcat.txt || true; adb shell dumpsys activity activities > StickerSheetMaker-emulator-activities.txt || true; adb exec-out screencap -p > StickerSheetMaker-emulator-smoke.png || true' EXIT
-            test -s apk/app-debug.apk
-            adb install -r apk/app-debug.apk
-            adb shell pm path com.oai.stickersheet | grep -q '^package:'
-            adb logcat -c
-            adb shell am start -W -n com.oai.stickersheet/.MainActivity | tee StickerSheetMaker-am-start.txt
-            sleep 4
-            PID="$(adb shell pidof com.oai.stickersheet | tr -d '\r')"
-            test -n "$PID"
-            adb shell dumpsys activity activities | grep -Eq 'mResumedActivity.*com\.oai\.stickersheet/.MainActivity|topResumedActivity.*com\.oai\.stickersheet/.MainActivity'
-            ! adb logcat -d -b crash | grep -q 'com.oai.stickersheet'
-            adb exec-out screencap -p > StickerSheetMaker-emulator-smoke.png
-            test -s StickerSheetMaker-emulator-smoke.png
+          script: bash .github/scripts/stickersheet-emulator-smoke.sh
 
       - name: Upload emulator evidence
         if: always()
