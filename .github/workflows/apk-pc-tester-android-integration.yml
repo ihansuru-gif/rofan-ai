@@ -32,7 +32,7 @@ jobs:
           emulator-boot-timeout: 600
           emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: |
-            set -euo pipefail
+            set -eu
 
             adb shell wm size 1080x2340
             adb shell wm density 440
