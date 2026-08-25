@@ -6,9 +6,12 @@ import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -59,6 +62,7 @@ public class MainActivity extends Activity {
     private SubjectCutoutService cutoutService;
     private StickerCanvasView canvasView;
     private TextView statusText;
+    private TextView countText;
     private Spinner patternSpinner;
     private Spinner pageSpinner;
     private SeekBar borderSeek;
@@ -77,22 +81,38 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout buildUi() {
-        int pad = dp(12);
+        int pad = dp(10);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(pad, pad, pad, pad);
-        root.setBackgroundColor(Color.rgb(250, 248, 250));
+        root.setBackgroundColor(Color.rgb(247, 244, 250));
         canvasView = new StickerCanvasView(this);
 
+        LinearLayout header = row();
+        header.setPadding(dp(4), dp(2), dp(4), dp(8));
+        LinearLayout headerCopy = new LinearLayout(this);
+        headerCopy.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(this);
-        title.setText("내 사진 스티커 · 3차");
-        title.setTextSize(22);
-        title.setTextColor(Color.rgb(35, 35, 38));
-        title.setPadding(0, 0, 0, dp(8));
-        root.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        title.setText("StickerSheetMaker v2");
+        title.setTextSize(23);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setTextColor(Color.rgb(42, 35, 58));
+        headerCopy.addView(title);
+        TextView subtitle = new TextView(this);
+        subtitle.setText("사진을 고르고 · 꾸미고 · 한 번에 저장");
+        subtitle.setTextSize(12);
+        subtitle.setTextColor(Color.rgb(112, 103, 128));
+        headerCopy.addView(subtitle);
+        header.addView(headerCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        countText = pill("0 / " + MAX_STICKERS);
+        header.addView(countText);
+        root.addView(header);
 
-        LinearLayout row1 = row();
-        Button add = button("사진 추가");
+        LinearLayout createCard = card();
+        createCard.addView(sectionLabel("1  스티커 만들기"));
+        LinearLayout createRow = row();
+        Button add = button("＋ 사진");
+        styleButton(add, true);
         add.setOnClickListener(v -> {
             if (backgroundBusy) {
                 toast("지금 처리 중이에요. 완료된 뒤 다시 눌러 주세요.");
@@ -100,41 +120,43 @@ public class MainActivity extends Activity {
             }
             pickImages();
         });
-        row1.addView(add, weighted());
+        createRow.addView(add, weighted());
 
-        Button auto = button("자동 배치");
-        auto.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            syncPattern();
-            canvasView.autoLayout(System.nanoTime());
+        Button text = button("＋ 글자");
+        text.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) showAddTextDialog();
         });
-        row1.addView(auto, weighted());
+        createRow.addView(text, weighted());
 
-        Button del = button("선택 삭제");
-        del.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            canvasView.deleteSelected();
+        Button smart = button("✦ 스마트 배치");
+        smart.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) applySmartLayout();
         });
-        row1.addView(del, weighted());
-        root.addView(row1);
+        createRow.addView(smart, weighted());
+        createCard.addView(createRow);
+        root.addView(createCard, cardParams());
 
-        LinearLayout row2 = row();
+        LinearLayout setupCard = card();
+        setupCard.addView(sectionLabel("2  시트 설정"));
+        LinearLayout chooserRow = row();
         patternSpinner = new Spinner(this);
         List<String> patternNames = new ArrayList<>();
         for (StickerLayoutEngine.PatternType p : StickerLayoutEngine.PatternType.values()) patternNames.add(p.label);
         patternSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, patternNames));
-        row2.addView(patternSpinner, weighted());
+        patternSpinner.setPadding(dp(8), 0, dp(4), 0);
+        chooserRow.addView(patternSpinner, weighted());
 
         pageSpinner = new Spinner(this);
         List<String> pageNames = new ArrayList<>();
         for (PageSpec p : PageSpec.values()) pageNames.add(p.label);
         pageSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, pageNames));
+        pageSpinner.setPadding(dp(8), 0, dp(4), 0);
         pageSpinner.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
             PageSpec spec = PageSpec.fromIndex(position);
             canvasView.setPageAspect(spec.aspect);
         }));
-        row2.addView(pageSpinner, weighted());
-        root.addView(row2);
+        chooserRow.addView(pageSpinner, weighted());
+        setupCard.addView(chooserRow);
 
         LinearLayout settings = row();
         settings.setGravity(Gravity.CENTER_VERTICAL);
@@ -148,11 +170,11 @@ public class MainActivity extends Activity {
         lineSeek.setMax(8);
         lineSeek.setProgress(3);
         settings.addView(lineSeek, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, .65f));
-        root.addView(settings);
+        setupCard.addView(settings);
 
         LinearLayout toggles = row();
         cutLineCheck = new CheckBox(this);
-        cutLineCheck.setText("칼선 표시");
+        cutLineCheck.setText("칼선");
         cutLineCheck.setChecked(true);
         toggles.addView(cutLineCheck, weighted());
 
@@ -162,57 +184,139 @@ public class MainActivity extends Activity {
         decorationCheck.setOnCheckedChangeListener((buttonView, isChecked) -> canvasView.setDecorationsEnabled(isChecked));
         toggles.addView(decorationCheck, weighted());
 
+        Button background = button("배경");
+        background.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) chooseBackgroundPattern();
+        });
+        toggles.addView(background, weighted());
+
+        Button decoration = button("데코");
+        decoration.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) chooseDecorationTheme();
+        });
+        toggles.addView(decoration, weighted());
+
         Button rebuild = button("테두리 적용");
         rebuild.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            rebuildOutlines();
+            if (!rejectWhenBusy()) rebuildOutlines();
         });
         toggles.addView(rebuild, weighted());
-        root.addView(toggles);
+        setupCard.addView(toggles);
+        root.addView(setupCard, cardParams());
+
+        TextView canvasLabel = sectionLabel("3  직접 편집  ·  한 손가락 이동 / 두 손가락 확대·회전");
+        canvasLabel.setPadding(dp(4), dp(5), dp(4), dp(3));
+        root.addView(canvasLabel);
 
         LinearLayout.LayoutParams canvasParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        canvasParams.topMargin = dp(8);
+        canvasParams.bottomMargin = dp(4);
         root.addView(canvasView, canvasParams);
 
-        statusText = new TextView(this);
-        statusText.setText("사진을 여러 장 선택해 주세요. 첫 누끼 실행은 모델 준비 때문에 조금 걸릴 수 있어요.");
-        statusText.setTextSize(12);
-        statusText.setTextColor(Color.DKGRAY);
-        statusText.setPadding(0, dp(6), 0, dp(4));
-        root.addView(statusText);
+        LinearLayout editBar = card();
+        LinearLayout editRow1 = row();
+        Button rotateLeft = button("↺ 15°");
+        rotateLeft.setOnClickListener(v -> selectionResult(canvasView.rotateSelected(-15f), "왼쪽으로 15° 회전"));
+        editRow1.addView(rotateLeft, weighted());
+        Button rotateRight = button("↻ 15°");
+        rotateRight.setOnClickListener(v -> selectionResult(canvasView.rotateSelected(15f), "오른쪽으로 15° 회전"));
+        editRow1.addView(rotateRight, weighted());
+        Button duplicate = button("복제");
+        duplicate.setOnClickListener(v -> {
+            if (canvasView.getItems().size() >= MAX_STICKERS) {
+                toast("한 시트에는 최대 " + MAX_STICKERS + "개까지 넣을 수 있어요.");
+                return;
+            }
+            if (canvasView.duplicateSelected()) {
+                refreshStickerCount();
+                statusText.setText("선택 스티커를 복제했어요.");
+            } else toast("먼저 스티커를 선택해 주세요.");
+        });
+        editRow1.addView(duplicate, weighted());
+        Button reset = button("위치 초기화");
+        reset.setOnClickListener(v -> selectionResult(canvasView.resetSelectedTransform(), "선택 스티커 위치를 초기화했어요."));
+        editRow1.addView(reset, weighted());
+        editBar.addView(editRow1);
 
-        LinearLayout exportRow = row();
+        LinearLayout editRow2 = row();
+        Button back = button("맨 뒤로");
+        back.setOnClickListener(v -> selectionResult(canvasView.sendSelectedToBack(), "선택 스티커를 맨 뒤로 보냈어요."));
+        editRow2.addView(back, weighted());
+        Button front = button("맨 앞으로");
+        front.setOnClickListener(v -> selectionResult(canvasView.bringSelectedToFront(), "선택 스티커를 맨 앞으로 가져왔어요."));
+        editRow2.addView(front, weighted());
+        Button del = button("선택 삭제");
+        del.setOnClickListener(v -> {
+            if (rejectWhenBusy()) return;
+            if (canvasView.deleteSelected()) {
+                refreshStickerCount();
+                statusText.setText("선택 스티커를 삭제했어요.");
+            } else toast("먼저 스티커를 선택해 주세요.");
+        });
+        editRow2.addView(del, weighted());
+        editBar.addView(editRow2);
+        root.addView(editBar, cardParams());
+
+        statusText = pill("사진을 여러 장 선택해 주세요. 첫 누끼는 모델 준비 때문에 조금 걸릴 수 있어요.");
+        statusText.setTextSize(11);
+        statusText.setTextColor(Color.rgb(75, 64, 96));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statusParams.setMargins(0, dp(3), 0, dp(3));
+        root.addView(statusText, statusParams);
+
+        LinearLayout finishRow = row();
         Button clear = button("전체 지우기");
         clear.setOnClickListener(v -> {
             if (rejectWhenBusy()) return;
-            processingQueue.clear();
-            canvasView.clearAll();
-            statusText.setText("스티커를 모두 지웠어요.");
+            new AlertDialog.Builder(this)
+                    .setTitle("시트를 비울까요?")
+                    .setMessage("현재 스티커가 모두 삭제돼요.")
+                    .setNegativeButton("취소", null)
+                    .setPositiveButton("전체 지우기", (dialog, which) -> {
+                        processingQueue.clear();
+                        canvasView.clearAll();
+                        refreshStickerCount();
+                        statusText.setText("새 시트를 시작할 준비가 됐어요.");
+                    })
+                    .show();
         });
-        exportRow.addView(clear, weighted());
+        finishRow.addView(clear, weighted());
 
-        Button png = button("PNG 저장");
-        png.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            createDocument("image/png", defaultExportFileName("png"), REQ_SAVE_PNG);
+        Button tools = button("모든 도구");
+        tools.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) showAdvancedTools();
         });
-        exportRow.addView(png, weighted());
+        finishRow.addView(tools, weighted());
 
-        Button pdf = button("PDF 저장");
-        pdf.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            createDocument("application/pdf", defaultExportFileName("pdf"), REQ_SAVE_PDF);
+        Button share = button("바로 공유");
+        share.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) sharePng();
         });
-        exportRow.addView(pdf, weighted());
-        root.addView(exportRow);
+        finishRow.addView(share, weighted());
 
-        Button advanced = button("2차 기능 · 글자 / 배경 / 데코 / 스마트배치 / 템플릿 / SVG / 공유");
-        advanced.setOnClickListener(v -> {
-            if (rejectWhenBusy()) return;
-            showAdvancedTools();
+        Button export = button("저장하기");
+        styleButton(export, true);
+        export.setOnClickListener(v -> {
+            if (!rejectWhenBusy()) showExportTools();
         });
-        root.addView(advanced, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        finishRow.addView(export, weighted());
+        root.addView(finishRow);
+        refreshStickerCount();
         return root;
+    }
+
+    private void showExportTools() {
+        String[] items = {"PNG 이미지", "PDF 인쇄 파일", "SVG CutContour", "PNG 바로 공유"};
+        new AlertDialog.Builder(this)
+                .setTitle("내보내기")
+                .setItems(items, (dialog, which) -> {
+                    switch (which) {
+                        case 0 -> createDocument("image/png", defaultExportFileName("png"), REQ_SAVE_PNG);
+                        case 1 -> createDocument("application/pdf", defaultExportFileName("pdf"), REQ_SAVE_PDF);
+                        case 2 -> createDocument("image/svg+xml", defaultCutlineFileName(), REQ_SAVE_SVG);
+                        case 3 -> sharePng();
+                    }
+                })
+                .show();
     }
 
     private void showAdvancedTools() {
@@ -227,7 +331,7 @@ public class MainActivity extends Activity {
                 "PNG 바로 공유"
         };
         new AlertDialog.Builder(this)
-                .setTitle("2차 기능")
+                .setTitle("모든 도구")
                 .setItems(items, (dialog, which) -> {
                     switch (which) {
                         case 0 -> showAddTextDialog();
@@ -300,6 +404,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     canvasView.addSticker(new StickerItem(finalForeground, finalSticker));
+                    refreshStickerCount();
                     setBackgroundBusy(false, "글자 스티커를 추가했어요.");
                 });
             } catch (Throwable e) {
@@ -543,6 +648,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     canvasView.addSticker(new StickerItem(foreground, finalSticker));
+                    refreshStickerCount();
                     processing = false;
                     if (fallback) statusText.setText("일부 사진은 사각형 사진 스티커로 처리됐어요.");
                     processNext();
@@ -803,6 +909,77 @@ public class MainActivity extends Activity {
         if (statusText != null && status != null) statusText.setText(status);
     }
 
+    private void selectionResult(boolean changed, String message) {
+        if (!changed) {
+            toast("먼저 스티커를 선택해 주세요.");
+            return;
+        }
+        statusText.setText(message);
+    }
+
+    private void refreshStickerCount() {
+        if (countText != null && canvasView != null) {
+            countText.setText(canvasView.getItems().size() + " / " + MAX_STICKERS);
+        }
+    }
+
+    private LinearLayout card() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(8), dp(7), dp(8), dp(7));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.WHITE);
+        background.setCornerRadius(dp(16));
+        background.setStroke(dp(1), Color.rgb(232, 226, 240));
+        card.setBackground(background);
+        card.setElevation(dp(2));
+        return card;
+    }
+
+    private LinearLayout.LayoutParams cardParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, 0, 0, dp(6));
+        return params;
+    }
+
+    private TextView sectionLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextSize(12);
+        label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        label.setTextColor(Color.rgb(75, 62, 98));
+        label.setPadding(dp(4), 0, dp(4), dp(3));
+        return label;
+    }
+
+    private TextView pill(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextSize(12);
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        view.setPadding(dp(11), dp(7), dp(11), dp(7));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(Color.rgb(239, 234, 249));
+        background.setCornerRadius(dp(18));
+        view.setBackground(background);
+        return view;
+    }
+
+    private void styleButton(Button button, boolean primary) {
+        GradientDrawable background = new GradientDrawable();
+        background.setCornerRadius(dp(12));
+        if (primary) {
+            background.setColor(Color.rgb(111, 91, 211));
+            button.setTextColor(Color.WHITE);
+        } else {
+            background.setColor(Color.WHITE);
+            background.setStroke(dp(1), Color.rgb(218, 210, 232));
+            button.setTextColor(Color.rgb(67, 55, 89));
+        }
+        button.setBackground(background);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+    }
+
     private LinearLayout row() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -819,9 +996,13 @@ public class MainActivity extends Activity {
     private Button button(String text) {
         Button b = new Button(this);
         b.setText(text);
-        b.setTextSize(12);
+        b.setTextSize(11);
         b.setAllCaps(false);
         b.setMinWidth(0);
+        b.setMinHeight(dp(44));
+        b.setPadding(dp(6), 0, dp(6), 0);
+        b.setStateListAnimator(null);
+        styleButton(b, false);
         return b;
     }
 
