@@ -45,10 +45,10 @@ public class StickerCanvasView extends View {
         super(context);
         setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         pagePaint.setColor(Color.WHITE);
-        pagePaint.setShadowLayer(dp(8), 0, dp(2), 0x30000000);
+        pagePaint.setShadowLayer(dp(12), 0, dp(3), 0x26000000);
         selectionPaint.setStyle(Paint.Style.STROKE);
         selectionPaint.setStrokeWidth(dp(2));
-        selectionPaint.setColor(Color.rgb(255, 94, 160));
+        selectionPaint.setColor(Color.rgb(111, 91, 211));
     }
 
     public List<StickerItem> getItems() {
@@ -68,13 +68,82 @@ public class StickerCanvasView extends View {
         invalidate();
     }
 
-    public void deleteSelected() {
-        if (selected != null) {
-            items.remove(selected);
-            recycleItem(selected);
-            selected = null;
-            invalidate();
+    public boolean deleteSelected() {
+        if (selected == null) return false;
+        items.remove(selected);
+        recycleItem(selected);
+        selected = null;
+        invalidate();
+        return true;
+    }
+
+    public boolean duplicateSelected() {
+        if (selected == null) return false;
+        Bitmap sourceForeground = selected.getForegroundBitmap();
+        Bitmap sourceSticker = selected.getStickerBitmap();
+        if (sourceForeground == null || sourceSticker == null
+                || sourceForeground.isRecycled() || sourceSticker.isRecycled()) return false;
+
+        Bitmap foregroundCopy = sourceForeground.copy(
+                sourceForeground.getConfig() == null ? Bitmap.Config.ARGB_8888 : sourceForeground.getConfig(), false);
+        Bitmap stickerCopy = sourceSticker == sourceForeground
+                ? foregroundCopy
+                : sourceSticker.copy(sourceSticker.getConfig() == null ? Bitmap.Config.ARGB_8888 : sourceSticker.getConfig(), false);
+        if (foregroundCopy == null || stickerCopy == null) {
+            if (foregroundCopy != null && !foregroundCopy.isRecycled()) foregroundCopy.recycle();
+            if (stickerCopy != null && stickerCopy != foregroundCopy && !stickerCopy.isRecycled()) stickerCopy.recycle();
+            return false;
         }
+
+        StickerItem copy = new StickerItem(foregroundCopy, stickerCopy);
+        copy.centerX = clamp(selected.centerX + .045f, .06f, .94f);
+        copy.centerY = clamp(selected.centerY + .045f, .06f, .94f);
+        copy.widthFraction = selected.widthFraction;
+        copy.rotationDegrees = selected.rotationDegrees;
+        items.add(copy);
+        selected = copy;
+        invalidate();
+        return true;
+    }
+
+    public boolean rotateSelected(float degrees) {
+        if (selected == null) return false;
+        selected.rotationDegrees = normalizeDegrees(selected.rotationDegrees + degrees);
+        invalidate();
+        return true;
+    }
+
+    public boolean resetSelectedTransform() {
+        if (selected == null) return false;
+        selected.centerX = .5f;
+        selected.centerY = .5f;
+        selected.rotationDegrees = 0f;
+        selected.widthFraction = .22f;
+        invalidate();
+        return true;
+    }
+
+    public boolean bringSelectedToFront() {
+        if (selected == null || items.isEmpty()) return false;
+        items.remove(selected);
+        items.add(selected);
+        invalidate();
+        return true;
+    }
+
+    public boolean sendSelectedToBack() {
+        if (selected == null || items.isEmpty()) return false;
+        items.remove(selected);
+        items.add(0, selected);
+        invalidate();
+        return true;
+    }
+
+    private float normalizeDegrees(float degrees) {
+        float normalized = degrees % 360f;
+        if (normalized > 180f) normalized -= 360f;
+        if (normalized < -180f) normalized += 360f;
+        return normalized;
     }
 
     private void recycleItem(StickerItem item) {
@@ -145,9 +214,9 @@ public class StickerCanvasView extends View {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        canvas.drawColor(Color.rgb(242, 242, 244));
+        canvas.drawColor(Color.rgb(238, 234, 245));
         computePageRect();
-        canvas.drawRoundRect(pageRect, dp(3), dp(3), pagePaint);
+        canvas.drawRoundRect(pageRect, dp(12), dp(12), pagePaint);
         canvas.save();
         canvas.clipRect(pageRect);
         drawContent(canvas, pageRect.left, pageRect.top, pageRect.width(), pageRect.height(), true);
