@@ -11,6 +11,11 @@ internal sealed class AppSettings
     public string? LastPackageId { get; set; }
     public bool AutoLaunchAfterInstall { get; set; } = true;
     public bool KeepDataOnInstall { get; set; } = true;
+    public string? LastProfileName { get; set; } = "일반 폰 393dp";
+    public int CustomWidthPx { get; set; } = 1080;
+    public int CustomHeightPx { get; set; } = 2340;
+    public int CustomDensityDpi { get; set; } = 440;
+    public bool Landscape { get; set; }
 
     public static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
