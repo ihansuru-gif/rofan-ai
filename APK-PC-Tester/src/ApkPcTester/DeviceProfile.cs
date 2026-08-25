@@ -8,6 +8,11 @@ internal sealed record DeviceProfile(string Name, int WidthPx, int HeightPx, int
     public override string ToString()
         => $"{Name} · {WidthPx}×{HeightPx} · {DensityDpi}dpi · 약 {WidthDp}dp 폭";
 
+    // ComboBox 복원 로직의 최종 fallback이 문자열일 때도 동일 타입으로 안전하게 취급한다.
+    // 실제 프리셋 목록은 항상 하나 이상이므로 정상 경로에서는 이 변환 객체가 선택되지 않는다.
+    public static implicit operator DeviceProfile(string name)
+        => new(name, 1080, 2340, 440, "사용자 지정 fallback");
+
     public static IReadOnlyList<DeviceProfile> Presets { get; } =
     [
         new("좁은 폰 360dp", 1080, 2400, 480, "폭이 좁은 일반 안드로이드폰 UI 점검용"),
