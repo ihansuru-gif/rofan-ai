@@ -8,13 +8,13 @@ on:
       - 'StickerSheetMaker/**'
       - '.github/workflows/stickersheet-build.yml'
       - '.github/scripts/stickersheet-emulator-smoke.sh'
-      - '.github/scripts/stickersheet-emulator-smoke.sh'
   pull_request:
     branches:
       - main
     paths:
       - 'StickerSheetMaker/**'
       - '.github/workflows/stickersheet-build.yml'
+      - '.github/scripts/stickersheet-emulator-smoke.sh'
   workflow_dispatch:
 
 jobs:
