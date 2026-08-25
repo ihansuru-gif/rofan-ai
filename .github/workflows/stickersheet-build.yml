@@ -83,6 +83,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Enable KVM access
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
       - name: Install and launch on Android emulator
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
@@ -91,20 +100,32 @@ jobs:
           target: google_apis
           profile: pixel_6
           disable-animations: true
+          disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
+            set -euxo pipefail
+            trap 'adb logcat -d > StickerSheetMaker-emulator-logcat.txt || true; adb shell dumpsys activity activities > StickerSheetMaker-emulator-activities.txt || true; adb exec-out screencap -p > StickerSheetMaker-emulator-smoke.png || true' EXIT
+            test -s apk/app-debug.apk
             adb install -r apk/app-debug.apk
-            adb shell am start -W -n com.oai.stickersheet/.MainActivity
+            adb shell pm path com.oai.stickersheet | grep -q '^package:'
+            adb logcat -c
+            adb shell am start -W -n com.oai.stickersheet/.MainActivity | tee StickerSheetMaker-am-start.txt
             sleep 4
             PID="$(adb shell pidof com.oai.stickersheet | tr -d '\r')"
             test -n "$PID"
-            adb shell dumpsys activity activities | grep -q 'com.oai.stickersheet/.MainActivity'
+            adb shell dumpsys activity activities | grep -Eq 'mResumedActivity.*com\.oai\.stickersheet/.MainActivity|topResumedActivity.*com\.oai\.stickersheet/.MainActivity'
+            ! adb logcat -d -b crash | grep -q 'com.oai.stickersheet'
             adb exec-out screencap -p > StickerSheetMaker-emulator-smoke.png
+            test -s StickerSheetMaker-emulator-smoke.png
 
-      - name: Upload emulator screenshot
+      - name: Upload emulator evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: StickerSheetMaker-emulator-smoke
-          path: StickerSheetMaker-emulator-smoke.png
-          if-no-files-found: ignore
+          path: |
+            StickerSheetMaker-emulator-smoke.png
+            StickerSheetMaker-emulator-logcat.txt
+            StickerSheetMaker-emulator-activities.txt
+            StickerSheetMaker-am-start.txt
+          if-no-files-found: warn
