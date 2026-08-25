@@ -88,10 +88,10 @@ jobs:
       - name: Install and launch on Android emulator
         uses: ReactiveCircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 29
           arch: x86_64
           target: google_apis
-          profile: pixel_6
+          profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: bash .github/scripts/stickersheet-emulator-smoke.sh
