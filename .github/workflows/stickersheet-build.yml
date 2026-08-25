@@ -103,7 +103,7 @@ jobs:
           disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           script: |
-            set -euxo pipefail
+            set -eux
             trap 'adb logcat -d > StickerSheetMaker-emulator-logcat.txt || true; adb shell dumpsys activity activities > StickerSheetMaker-emulator-activities.txt || true; adb exec-out screencap -p > StickerSheetMaker-emulator-smoke.png || true' EXIT
             test -s apk/app-debug.apk
             adb install -r apk/app-debug.apk
