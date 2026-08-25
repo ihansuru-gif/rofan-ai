@@ -1,9 +1,10 @@
-name: StickerSheetMaker Android Build
+name: StickerSheetMaker v2 Android Build
 
 on:
   push:
     branches:
       - stickersheet-build-20260822
+      - stickersheet-v2
     paths:
       - 'StickerSheetMaker/**'
       - '.github/workflows/stickersheet-build.yml'
@@ -53,7 +54,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: StickerSheetMaker-v0.3.0-debug-apk
+          name: StickerSheetMaker-v2.0.0-debug-apk
           path: StickerSheetMaker/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -76,7 +77,7 @@ jobs:
       - name: Download built APK
         uses: actions/download-artifact@v4
         with:
-          name: StickerSheetMaker-v0.3.0-debug-apk
+          name: StickerSheetMaker-v2.0.0-debug-apk
           path: apk
 
       - name: Set up JDK 17
