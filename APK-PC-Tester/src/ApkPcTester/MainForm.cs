@@ -12,6 +12,7 @@ internal sealed class MainForm : Form
     private Process? _logcatProcess;
     private Process? _emulatorProcess;
     private bool _frameBusy;
+    private bool _suppressProfileEvents;
     private Point? _gestureStart;
     private DateTime _gestureStartedAt;
 
@@ -26,7 +27,7 @@ internal sealed class MainForm : Form
     private readonly NumericUpDown _dpiBox = new() { Minimum = 120, Maximum = 1000, Increment = 10, Value = 440, Width = 80 };
     private readonly CheckBox _autoLaunchCheck = new() { Text = "설치 후 자동 실행", AutoSize = true, Checked = true };
     private readonly CheckBox _replaceCheck = new() { Text = "기존 데이터 유지 재설치", AutoSize = true, Checked = true };
-    private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = false, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 10, 0) };
+    private readonly Label _status = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(10, 0, 10, 0) };
     private readonly Label _profileInfo = new() { AutoSize = true, ForeColor = Color.DimGray };
     private readonly Label _previewInfo = new() { AutoSize = true, Text = "가상폰이 꺼져 있음", Padding = new Padding(4, 5, 8, 0) };
     private readonly TextBox _inputTextBox = new() { Width = 210 };
@@ -65,7 +66,6 @@ internal sealed class MainForm : Form
 
         foreach (var profile in DeviceProfile.Presets) _profileBox.Items.Add(profile);
         _profileBox.Items.Add(CustomProfileText);
-
         _phoneFrame.Controls.Add(_previewBox);
         _previewStage.Controls.Add(_phoneFrame);
 
@@ -82,22 +82,14 @@ internal sealed class MainForm : Form
         _lifetime.Cancel();
         ProcessRunner.TryKill(_logcatProcess);
         ProcessRunner.TryKill(_emulatorProcess);
-        var old = _previewBox.Image;
-        _previewBox.Image = null;
-        old?.Dispose();
+        ClearPreview();
         SaveSettings();
         base.OnFormClosed(e);
     }
 
     private void BuildUi()
     {
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(10)
-        };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, Padding = new Padding(10) };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -112,10 +104,8 @@ internal sealed class MainForm : Form
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        AddRow(top, 0, "Android SDK", _sdkBox,
-            MakeButton("SDK 선택", ChooseSdk), MakeButton("환경 새로고침", async (_, _) => await RefreshEnvironmentAsync()));
-        AddRow(top, 1, "APK", _apkBox,
-            MakeButton("APK 선택", ChooseApk), MakeButton("패키지 감지", async (_, _) => await DetectPackageAsync()));
+        AddRow(top, 0, "Android SDK", _sdkBox, MakeButton("SDK 선택", ChooseSdk), MakeButton("환경 새로고침", async (_, _) => await RefreshEnvironmentAsync()));
+        AddRow(top, 1, "APK", _apkBox, MakeButton("APK 선택", ChooseApk), MakeButton("패키지 감지", async (_, _) => await DetectPackageAsync()));
         AddRow(top, 2, "Package ID", _packageBox, null, null);
         root.Controls.Add(top, 0, 1);
 
@@ -128,7 +118,6 @@ internal sealed class MainForm : Form
             Panel2MinSize = 650
         };
         root.Controls.Add(main, 0, 2);
-
         BuildControlPanel(main.Panel1);
         BuildPreviewPanel(main.Panel2);
     }
@@ -137,18 +126,10 @@ internal sealed class MainForm : Form
     {
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 0, 10, 0) };
         parent.Controls.Add(scroll);
-
-        var stack = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Padding = new Padding(0)
-        };
+        var stack = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         scroll.Controls.Add(stack);
 
-        var virtualPhone = MakeGroup("가상폰", 360, 320);
+        var virtualPhone = MakeGroup("가상폰", 360, 330);
         stack.Controls.Add(virtualPhone);
         var phoneLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 8, Padding = new Padding(10) };
         phoneLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
@@ -177,8 +158,7 @@ internal sealed class MainForm : Form
         dimensions.Controls.Add(new Label { Text = "dpi", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
         phoneLayout.Controls.Add(MakeFieldLabel("직접 설정"), 0, 3);
         phoneLayout.Controls.Add(dimensions, 1, 3);
-
-        phoneLayout.Controls.Add(new Label { Text = "", AutoSize = true }, 0, 4);
+        phoneLayout.Controls.Add(new Label(), 0, 4);
         phoneLayout.Controls.Add(_profileInfo, 1, 4);
 
         var profileButtons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
@@ -192,28 +172,18 @@ internal sealed class MainForm : Form
         rotateButtons.Controls.Add(MakeButton("가로", async (_, _) => await SetOrientationAsync(true)));
         phoneLayout.Controls.Add(MakeFieldLabel("방향"), 0, 6);
         phoneLayout.Controls.Add(rotateButtons, 1, 6);
-
         phoneLayout.Controls.Add(MakeFieldLabel("현재 Android"), 0, 7);
         phoneLayout.Controls.Add(_deviceBox, 1, 7);
 
         var apkGroup = MakeGroup("APK 테스트", 360, 325);
         stack.Controls.Add(apkGroup);
-        var actions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            Padding = new Padding(10)
-        };
+        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(10) };
         apkGroup.Controls.Add(actions);
-
-        actions.Controls.Add(MakeBigButton("APK 설치 + 실행", async (_, _) => await InstallAndRunAsync(), emphasize: true));
+        actions.Controls.Add(MakeBigButton("APK 설치 + 실행", async (_, _) => await InstallAndRunAsync(), true));
         actions.Controls.Add(MakeBigButton("앱 실행", async (_, _) => await RunPackageActionAsync("앱 실행", _android.LaunchAppAsync)));
         actions.Controls.Add(MakeBigButton("앱 강제 종료", async (_, _) => await RunPackageActionAsync("앱 강제 종료", _android.ForceStopAsync)));
-        actions.Controls.Add(MakeBigButton("앱 데이터 초기화", async (_, _) => await ConfirmAndRunPackageActionAsync(
-            "앱 데이터 초기화", "앱의 저장 데이터가 모두 지워집니다. 계속할까요?", _android.ClearDataAsync)));
-        actions.Controls.Add(MakeBigButton("앱 삭제", async (_, _) => await ConfirmAndRunPackageActionAsync(
-            "앱 삭제", "가상폰에서 이 앱을 삭제합니다. 계속할까요?", _android.UninstallAsync)));
+        actions.Controls.Add(MakeBigButton("앱 데이터 초기화", async (_, _) => await ConfirmAndRunPackageActionAsync("앱 데이터 초기화", "앱의 저장 데이터가 모두 지워집니다. 계속할까요?", _android.ClearDataAsync)));
+        actions.Controls.Add(MakeBigButton("앱 삭제", async (_, _) => await ConfirmAndRunPackageActionAsync("앱 삭제", "가상폰에서 이 앱을 삭제합니다. 계속할까요?", _android.UninstallAsync)));
         actions.Controls.Add(MakeBigButton("현재 화면 PNG 저장", async (_, _) => await CaptureScreenshotAsync()));
         actions.Controls.Add(_autoLaunchCheck);
         actions.Controls.Add(_replaceCheck);
@@ -223,8 +193,9 @@ internal sealed class MainForm : Form
         var inputFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(10), AutoScroll = true };
         inputGroup.Controls.Add(inputFlow);
         inputFlow.Controls.Add(_inputTextBox);
-        inputFlow.Controls.Add(MakeButton("텍스트 보내기", async (_, _) => await SendTextAsync()));
-        inputFlow.SetFlowBreak(inputFlow.Controls[^1], true);
+        var sendText = MakeButton("텍스트 보내기", async (_, _) => await SendTextAsync());
+        inputFlow.Controls.Add(sendText);
+        inputFlow.SetFlowBreak(sendText, true);
         inputFlow.Controls.Add(MakeButton("뒤로", async (_, _) => await SendKeyAsync(4)));
         inputFlow.Controls.Add(MakeButton("홈", async (_, _) => await SendKeyAsync(3)));
         inputFlow.Controls.Add(MakeButton("최근 앱", async (_, _) => await SendKeyAsync(187)));
@@ -243,10 +214,9 @@ internal sealed class MainForm : Form
         previewArea.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
         previewArea.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         right.Controls.Add(previewArea, 0, 0);
-
-        var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+        var toolbar = new FlowLayoutPanel { Dock = DockStyle.Fill };
         toolbar.Controls.Add(_previewInfo);
-        toolbar.Controls.Add(MakeButton("화면 새로고침", async (_, _) => await RefreshPreviewFrameAsync(force: true)));
+        toolbar.Controls.Add(MakeButton("화면 새로고침", async (_, _) => await RefreshPreviewFrameAsync(true)));
         toolbar.Controls.Add(MakeButton("Android 목록 새로고침", async (_, _) => await RefreshDevicesAsync()));
         previewArea.Controls.Add(toolbar, 0, 0);
         previewArea.Controls.Add(_previewStage, 0, 1);
@@ -262,7 +232,6 @@ internal sealed class MainForm : Form
         logRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         logRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         logTab.Controls.Add(logRoot);
-
         var logToolbar = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         _logButton.Click += async (_, _) => await ToggleLogcatAsync();
         logToolbar.Controls.Add(_logButton);
@@ -276,12 +245,14 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             Padding = new Padding(16),
+            AutoSize = false,
             Text = "오른쪽 가상폰 화면은 실제 Android 화면입니다.\r\n\r\n" +
-                   "• 클릭 = 화면 탭\r\n• 드래그 = 스와이프\r\n• APK를 프로그램 창에 끌어다 놓을 수 있음\r\n" +
-                   "• 화면 규격은 실제 Android의 해상도와 density를 바꿈\r\n• 360dp / 393dp / 411dp처럼 폭을 바꿔 UI 잘림을 확인\r\n" +
-                   "• 사용자 지정에서 픽셀 폭·높이·DPI를 직접 입력 가능\r\n\r\n" +
-                   "Android 운영체제 이미지는 Android SDK의 System Image를 사용합니다.",
-            AutoSize = false
+                   "• 클릭 = 탭 / 드래그 = 스와이프\r\n" +
+                   "• APK 파일을 프로그램 창에 끌어다 놓을 수 있음\r\n" +
+                   "• 360dp / 393dp / 411dp 등 화면 폭을 실제 Android에 적용\r\n" +
+                   "• 사용자 지정에서 픽셀 폭·높이·DPI 직접 입력\r\n" +
+                   "• 세로/가로 전환, 뒤로/홈/최근 앱, 텍스트 입력 지원\r\n\r\n" +
+                   "Android 운영체제는 Android SDK의 System Image를 사용합니다."
         });
     }
 
@@ -293,8 +264,7 @@ internal sealed class MainForm : Form
             _deviceTimer.Start();
             _previewTimer.Start();
         };
-
-        _deviceTimer.Tick += async (_, _) => await RefreshDevicesAsync(silent: true);
+        _deviceTimer.Tick += async (_, _) => await RefreshDevicesAsync(true);
         _previewTimer.Tick += async (_, _) => await RefreshPreviewFrameAsync();
         _previewStage.Resize += (_, _) => FitPhoneFrame();
 
@@ -302,14 +272,9 @@ internal sealed class MainForm : Form
         DragDrop += OnDragDrop;
         _apkBox.DragEnter += OnDragEnter;
         _apkBox.DragDrop += OnDragDrop;
-
         _apkBox.TextChanged += (_, _) => { _settings.LastApkPath = _apkBox.Text.Trim(); SaveSettings(); };
         _packageBox.TextChanged += (_, _) => { _settings.LastPackageId = _packageBox.Text.Trim(); SaveSettings(); };
-        _avdBox.SelectedIndexChanged += (_, _) =>
-        {
-            if (_avdBox.SelectedItem is string avd) _settings.LastAvd = avd;
-            SaveSettings();
-        };
+        _avdBox.SelectedIndexChanged += (_, _) => { if (_avdBox.SelectedItem is string avd) _settings.LastAvd = avd; SaveSettings(); };
         _deviceBox.SelectedIndexChanged += (_, _) =>
         {
             if (_deviceBox.SelectedItem is AndroidDevice d) _settings.LastSerial = d.Serial;
@@ -387,14 +352,25 @@ internal sealed class MainForm : Form
         _packageBox.Text = _settings.LastPackageId ?? string.Empty;
         _autoLaunchCheck.Checked = _settings.AutoLaunchAfterInstall;
         _replaceCheck.Checked = _settings.KeepDataOnInstall;
-        _widthBox.Value = Math.Clamp(_settings.CustomWidthPx, (int)_widthBox.Minimum, (int)_widthBox.Maximum);
-        _heightBox.Value = Math.Clamp(_settings.CustomHeightPx, (int)_heightBox.Minimum, (int)_heightBox.Maximum);
-        _dpiBox.Value = Math.Clamp(_settings.CustomDensityDpi, (int)_dpiBox.Minimum, (int)_dpiBox.Maximum);
 
-        var match = _profileBox.Items.Cast<object>()
-            .OfType<DeviceProfile>()
-            .FirstOrDefault(x => string.Equals(x.Name, _settings.LastProfileName, StringComparison.Ordinal));
-        _profileBox.SelectedItem = match ?? _profileBox.Items.Cast<object>().First();
+        _suppressProfileEvents = true;
+        try
+        {
+            SetNumeric(_widthBox, _settings.CustomWidthPx);
+            SetNumeric(_heightBox, _settings.CustomHeightPx);
+            SetNumeric(_dpiBox, _settings.CustomDensityDpi);
+            if (string.Equals(_settings.LastProfileName, CustomProfileText, StringComparison.Ordinal))
+            {
+                _profileBox.SelectedItem = CustomProfileText;
+            }
+            else
+            {
+                var match = _profileBox.Items.Cast<object>().OfType<DeviceProfile>()
+                    .FirstOrDefault(x => string.Equals(x.Name, _settings.LastProfileName, StringComparison.Ordinal));
+                _profileBox.SelectedItem = match ?? _profileBox.Items.Cast<object>().OfType<DeviceProfile>().FirstOrDefault() ?? CustomProfileText;
+            }
+        }
+        finally { _suppressProfileEvents = false; }
         OnProfileSelected();
     }
 
@@ -412,6 +388,48 @@ internal sealed class MainForm : Form
         _settings.Save();
     }
 
+    private void OnProfileSelected()
+    {
+        if (_suppressProfileEvents) return;
+        _suppressProfileEvents = true;
+        try
+        {
+            if (_profileBox.SelectedItem is DeviceProfile p)
+            {
+                SetNumeric(_widthBox, p.WidthPx);
+                SetNumeric(_heightBox, p.HeightPx);
+                SetNumeric(_dpiBox, p.DensityDpi);
+                _profileInfo.Text = $"약 {p.WidthDp}×{p.HeightDp}dp · {p.Note}";
+            }
+            else
+            {
+                var custom = GetCurrentProfile();
+                _profileInfo.Text = $"약 {custom.WidthDp}×{custom.HeightDp}dp · 직접 입력";
+            }
+            FitPhoneFrame();
+            SaveSettings();
+        }
+        finally { _suppressProfileEvents = false; }
+    }
+
+    private void OnCustomDimensionChanged()
+    {
+        if (_suppressProfileEvents) return;
+        if (_profileBox.SelectedItem is DeviceProfile p &&
+            (p.WidthPx != (int)_widthBox.Value || p.HeightPx != (int)_heightBox.Value || p.DensityDpi != (int)_dpiBox.Value))
+        {
+            _profileBox.SelectedItem = CustomProfileText;
+            return;
+        }
+        var custom = GetCurrentProfile();
+        _profileInfo.Text = $"약 {custom.WidthDp}×{custom.HeightDp}dp · {(_profileBox.SelectedItem is DeviceProfile dp ? dp.Note : "직접 입력")}";
+        FitPhoneFrame();
+        SaveSettings();
+    }
+
+    private static void SetNumeric(NumericUpDown box, int value)
+        => box.Value = Math.Clamp(value, (int)box.Minimum, (int)box.Maximum);
+
     private async Task RefreshEnvironmentAsync()
     {
         try
@@ -426,13 +444,10 @@ internal sealed class MainForm : Form
                 foreach (var avd in await _android.GetAvdsAsync()) _avdBox.Items.Add(avd);
                 SelectComboItem(_avdBox, _settings.LastAvd);
             }
+            await RefreshDevicesAsync(true);
 
-            await RefreshDevicesAsync(silent: true);
             if (_android.HasAdb && _android.HasEmulator)
-            {
-                var imageCount = _android.GetInstalledSystemImagePackages().Count;
-                SetStatus($"준비됨 · AVD {_avdBox.Items.Count}개 · Android System Image {imageCount}개", true);
-            }
+                SetStatus($"준비됨 · AVD {_avdBox.Items.Count}개 · Android System Image {_android.GetInstalledSystemImagePackages().Count}개", true);
             else if (_android.HasAdb)
                 SetStatus("adb는 찾았지만 Android Emulator가 없습니다. SDK Tools에서 Android Emulator를 설치하세요.", false);
             else
@@ -487,12 +502,13 @@ internal sealed class MainForm : Form
         {
             if (!_android.HasEmulator) throw new InvalidOperationException("Android Emulator가 설치되어 있지 않습니다.");
 
-            if (_deviceBox.SelectedItem is AndroidDevice already &&
-                already.Serial.StartsWith("emulator-", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(already.State, "device", StringComparison.OrdinalIgnoreCase))
+            if (_deviceBox.SelectedItem is AndroidDevice running &&
+                running.Serial.StartsWith("emulator-", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(running.State, "device", StringComparison.OrdinalIgnoreCase))
             {
                 await ApplyCurrentProfileAsync();
-                SetStatus("이미 실행 중인 가상폰에 현재 규격을 적용했습니다.", true);
+                await SetOrientationAsync(_settings.Landscape);
+                SetStatus("실행 중인 가상폰에 현재 규격을 적용했습니다.", true);
                 return;
             }
 
@@ -512,7 +528,7 @@ internal sealed class MainForm : Form
                 .Select(d => d.Serial)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            _emulatorProcess = _android.StartEmulator(avd, coldBoot, headless: true);
+            _emulatorProcess = _android.StartEmulator(avd, coldBoot, true);
             AppendLog($"[가상폰] {avd} 백그라운드 실행");
             SetBusyStatus("가상폰 Android 부팅 중...");
 
@@ -521,23 +537,23 @@ internal sealed class MainForm : Form
             {
                 await Task.Delay(1200, _lifetime.Token);
                 var devices = await _android.GetDevicesAsync();
-                emulator = devices.FirstOrDefault(d =>
-                    d.Serial.StartsWith("emulator-", StringComparison.OrdinalIgnoreCase) && !before.Contains(d.Serial));
+                emulator = devices.FirstOrDefault(d => d.Serial.StartsWith("emulator-", StringComparison.OrdinalIgnoreCase) && !before.Contains(d.Serial));
                 if (emulator is not null) break;
                 if (before.Count == 0)
+                {
                     emulator = devices.FirstOrDefault(d => d.Serial.StartsWith("emulator-", StringComparison.OrdinalIgnoreCase));
-                if (emulator is not null) break;
+                    if (emulator is not null) break;
+                }
             }
-
             if (emulator is null) throw new TimeoutException("가상폰 adb 연결을 확인하지 못했습니다.");
 
             await _android.WaitForBootAsync(emulator.Serial, new Progress<string>(SetBusyStatus), _lifetime.Token);
-            await RefreshDevicesAsync(silent: true);
+            await RefreshDevicesAsync(true);
             SelectDevice(emulator.Serial);
             await ApplyCurrentProfileAsync();
             await SetOrientationAsync(_settings.Landscape);
-            await RefreshPreviewFrameAsync(force: true);
-            SetStatus("가상폰 준비 완료 · APK를 설치해서 바로 테스트할 수 있습니다.", true);
+            await RefreshPreviewFrameAsync(true);
+            SetStatus("가상폰 준비 완료 · APK를 설치해서 오른쪽 화면에서 직접 테스트하세요.", true);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { ShowError("가상폰 실행 실패", ex); }
@@ -557,7 +573,7 @@ internal sealed class MainForm : Form
             _emulatorProcess = null;
             ClearPreview();
             await Task.Delay(500);
-            await RefreshDevicesAsync(silent: true);
+            await RefreshDevicesAsync(true);
             SetStatus("가상폰 종료", true);
         }
         catch (Exception ex) { ShowError("가상폰 종료 실패", ex); }
@@ -565,8 +581,8 @@ internal sealed class MainForm : Form
 
     private DeviceProfile GetCurrentProfile()
     {
-        var name = _profileBox.SelectedItem is DeviceProfile p ? p.Name : "사용자 지정";
-        return new DeviceProfile(name, (int)_widthBox.Value, (int)_heightBox.Value, (int)_dpiBox.Value, "");
+        var name = _profileBox.SelectedItem is DeviceProfile p ? p.Name : CustomProfileText;
+        return new DeviceProfile(name, (int)_widthBox.Value, (int)_heightBox.Value, (int)_dpiBox.Value, string.Empty);
     }
 
     private async Task ApplyCurrentProfileAsync()
@@ -583,7 +599,7 @@ internal sealed class MainForm : Form
             FitPhoneFrame();
             UpdatePreviewInfo();
             await Task.Delay(350);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
             SetStatus($"화면 규격 적용 완료 · 약 {profile.WidthDp}dp 폭", true);
         }
         catch (Exception ex) { ShowError("화면 규격 적용 실패", ex); }
@@ -599,7 +615,7 @@ internal sealed class MainForm : Form
             AppendResult("화면 규격 원본", r);
             if (!r.Success) throw new InvalidOperationException(CombineResult(r));
             await Task.Delay(350);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
             SetStatus("Android 기반의 원본 화면 규격으로 복원했습니다.", true);
         }
         catch (Exception ex) { ShowError("화면 규격 복원 실패", ex); }
@@ -617,7 +633,7 @@ internal sealed class MainForm : Form
             SaveSettings();
             FitPhoneFrame();
             await Task.Delay(450);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
             UpdatePreviewInfo();
         }
         catch (Exception ex) { ShowError("화면 방향 변경 실패", ex); }
@@ -655,7 +671,6 @@ internal sealed class MainForm : Form
         var start = _gestureStart;
         _gestureStart = null;
         if (start is null) return;
-
         try
         {
             var serial = RequireSerial();
@@ -667,19 +682,14 @@ internal sealed class MainForm : Form
             var dy = end.Y - start.Value.Y;
             var distance = Math.Sqrt(dx * dx + dy * dy);
             if (distance < 10)
-            {
                 await _android.TapAsync(serial, mappedEnd.Value.X, mappedEnd.Value.Y);
-            }
             else
             {
                 var duration = (int)Math.Clamp((DateTime.UtcNow - _gestureStartedAt).TotalMilliseconds, 100, 1200);
-                await _android.SwipeAsync(serial,
-                    mappedStart.Value.X, mappedStart.Value.Y,
-                    mappedEnd.Value.X, mappedEnd.Value.Y,
-                    duration);
+                await _android.SwipeAsync(serial, mappedStart.Value.X, mappedStart.Value.Y, mappedEnd.Value.X, mappedEnd.Value.Y, duration);
             }
             await Task.Delay(80);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
         }
         catch (Exception ex) { AppendLog("[터치 입력] " + ex.Message); }
     }
@@ -688,18 +698,15 @@ internal sealed class MainForm : Form
     {
         if (_previewBox.Image is null) return null;
         var rect = GetZoomedImageRectangle(_previewBox, _previewBox.Image.Size);
-        if (!rect.Contains(point)) return null;
+        if (rect == Rectangle.Empty || !rect.Contains(point)) return null;
         var x = (int)Math.Round((point.X - rect.X) * (_previewBox.Image.Width / (double)rect.Width));
         var y = (int)Math.Round((point.Y - rect.Y) * (_previewBox.Image.Height / (double)rect.Height));
-        return new Point(
-            Math.Clamp(x, 0, _previewBox.Image.Width - 1),
-            Math.Clamp(y, 0, _previewBox.Image.Height - 1));
+        return new Point(Math.Clamp(x, 0, _previewBox.Image.Width - 1), Math.Clamp(y, 0, _previewBox.Image.Height - 1));
     }
 
     private static Rectangle GetZoomedImageRectangle(PictureBox box, Size image)
     {
-        if (image.Width <= 0 || image.Height <= 0 || box.ClientSize.Width <= 0 || box.ClientSize.Height <= 0)
-            return Rectangle.Empty;
+        if (image.Width <= 0 || image.Height <= 0 || box.ClientSize.Width <= 0 || box.ClientSize.Height <= 0) return Rectangle.Empty;
         var scale = Math.Min(box.ClientSize.Width / (double)image.Width, box.ClientSize.Height / (double)image.Height);
         var width = Math.Max(1, (int)Math.Round(image.Width * scale));
         var height = Math.Max(1, (int)Math.Round(image.Height * scale));
@@ -731,8 +738,7 @@ internal sealed class MainForm : Form
         if (char.IsControl(e.KeyChar)) return;
         try
         {
-            var serial = RequireSerial();
-            await _android.InputTextAsync(serial, e.KeyChar.ToString());
+            await _android.InputTextAsync(RequireSerial(), e.KeyChar.ToString());
             e.Handled = true;
         }
         catch { }
@@ -742,11 +748,10 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var serial = RequireSerial();
             if (string.IsNullOrEmpty(_inputTextBox.Text)) return;
-            var r = await _android.InputTextAsync(serial, _inputTextBox.Text);
+            var r = await _android.InputTextAsync(RequireSerial(), _inputTextBox.Text);
             if (!r.Success) throw new InvalidOperationException(CombineResult(r));
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
         }
         catch (Exception ex) { ShowError("텍스트 입력 실패", ex); }
     }
@@ -755,55 +760,17 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var serial = RequireSerial();
-            var r = await _android.KeyEventAsync(serial, keyCode);
+            var r = await _android.KeyEventAsync(RequireSerial(), keyCode);
             if (!r.Success) throw new InvalidOperationException(CombineResult(r));
             await Task.Delay(80);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
         }
         catch (Exception ex) { AppendLog("[키 입력] " + ex.Message); }
     }
 
-    private void OnProfileSelected()
-    {
-        if (_profileBox.SelectedItem is DeviceProfile p)
-        {
-            SetNumeric(_widthBox, p.WidthPx);
-            SetNumeric(_heightBox, p.HeightPx);
-            SetNumeric(_dpiBox, p.DensityDpi);
-            _profileInfo.Text = $"약 {p.WidthDp}×{p.HeightDp}dp · {p.Note}";
-        }
-        else
-        {
-            var custom = GetCurrentProfile();
-            _profileInfo.Text = $"약 {custom.WidthDp}×{custom.HeightDp}dp · 직접 입력";
-        }
-        FitPhoneFrame();
-        SaveSettings();
-    }
-
-    private void OnCustomDimensionChanged()
-    {
-        if (_profileBox.SelectedItem is DeviceProfile p &&
-            p.WidthPx == (int)_widthBox.Value && p.HeightPx == (int)_heightBox.Value && p.DensityDpi == (int)_dpiBox.Value)
-            return;
-
-        if (_profileBox.Items.Count > 0 && _profileBox.SelectedItem is not null && _profileBox.SelectedItem is not string)
-            _profileBox.SelectedItem = CustomProfileText;
-
-        var custom = GetCurrentProfile();
-        _profileInfo.Text = $"약 {custom.WidthDp}×{custom.HeightDp}dp · 직접 입력";
-        FitPhoneFrame();
-        SaveSettings();
-    }
-
-    private static void SetNumeric(NumericUpDown box, int value)
-        => box.Value = Math.Clamp(value, (int)box.Minimum, (int)box.Maximum);
-
     private void FitPhoneFrame(int? imageWidth = null, int? imageHeight = null)
     {
         if (_previewStage.ClientSize.Width <= 0 || _previewStage.ClientSize.Height <= 0) return;
-
         var width = imageWidth ?? GetCurrentProfile().WidthPx;
         var height = imageHeight ?? GetCurrentProfile().HeightPx;
         if (_settings.Landscape && imageWidth is null) (width, height) = (height, width);
@@ -819,12 +786,7 @@ internal sealed class MainForm : Form
             targetHeight = maxHeight;
             targetWidth = (int)Math.Round(targetHeight * ratio);
         }
-
-        _phoneFrame.Bounds = new Rectangle(
-            (_previewStage.ClientSize.Width - targetWidth) / 2,
-            (_previewStage.ClientSize.Height - targetHeight) / 2,
-            Math.Max(80, targetWidth),
-            Math.Max(80, targetHeight));
+        _phoneFrame.Bounds = new Rectangle((_previewStage.ClientSize.Width - targetWidth) / 2, (_previewStage.ClientSize.Height - targetHeight) / 2, Math.Max(80, targetWidth), Math.Max(80, targetHeight));
     }
 
     private void UpdatePreviewInfo(int? actualWidth = null, int? actualHeight = null)
@@ -854,7 +816,6 @@ internal sealed class MainForm : Form
             var apk = RequireApk();
             var serial = RequireSerial();
             SetBusyStatus("APK 분석 중...");
-
             var packageId = _packageBox.Text.Trim();
             if (string.IsNullOrWhiteSpace(packageId))
             {
@@ -862,8 +823,8 @@ internal sealed class MainForm : Form
                 if (!string.IsNullOrWhiteSpace(packageId)) _packageBox.Text = packageId;
             }
 
-            AppendLog($"[설치] {Path.GetFileName(apk)} -> {serial}");
             SetBusyStatus("APK 설치 중...");
+            AppendLog($"[설치] {Path.GetFileName(apk)} -> {serial}");
             var install = await _android.InstallApkAsync(serial, apk, _replaceCheck.Checked);
             AppendResult("install", install);
             if (!install.Success) throw new InvalidOperationException("APK 설치 실패\r\n" + CombineResult(install));
@@ -880,9 +841,8 @@ internal sealed class MainForm : Form
                 AppendResult("launch", run);
                 if (!run.Success) throw new InvalidOperationException("앱 실행 실패\r\n" + CombineResult(run));
             }
-
             await Task.Delay(300);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
             SetStatus("설치/실행 완료 · 오른쪽 가상폰에서 직접 조작하세요.", true);
         }
         catch (Exception ex) { ShowError("APK 설치/실행 실패", ex); }
@@ -892,10 +852,8 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var apk = RequireApk();
-            var id = await _android.DetectPackageIdAsync(apk);
-            if (string.IsNullOrWhiteSpace(id))
-                throw new InvalidOperationException("Package ID를 읽지 못했습니다. Android SDK Build-Tools(aapt)를 확인하세요.");
+            var id = await _android.DetectPackageIdAsync(RequireApk());
+            if (string.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Package ID를 읽지 못했습니다. Android SDK Build-Tools(aapt)를 확인하세요.");
             _packageBox.Text = id;
             SetStatus("Package ID 감지: " + id, true);
         }
@@ -906,14 +864,12 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var serial = RequireSerial();
-            var pkg = RequirePackageId();
             SetBusyStatus(name + " 중...");
-            var r = await action(serial, pkg);
+            var r = await action(RequireSerial(), RequirePackageId());
             AppendResult(name, r);
             if (!r.Success) throw new InvalidOperationException(CombineResult(r));
             await Task.Delay(150);
-            await RefreshPreviewFrameAsync(force: true);
+            await RefreshPreviewFrameAsync(true);
             SetStatus(name + " 완료", true);
         }
         catch (Exception ex) { ShowError(name + " 실패", ex); }
@@ -929,15 +885,10 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var serial = RequireSerial();
-            using var dialog = new SaveFileDialog
-            {
-                Filter = "PNG image|*.png",
-                FileName = $"apk-test-{DateTime.Now:yyyyMMdd-HHmmss}.png"
-            };
+            using var dialog = new SaveFileDialog { Filter = "PNG image|*.png", FileName = $"apk-test-{DateTime.Now:yyyyMMdd-HHmmss}.png" };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
             SetBusyStatus("스크린샷 저장 중...");
-            var path = await _android.CaptureScreenshotAsync(serial, dialog.FileName);
+            var path = await _android.CaptureScreenshotAsync(RequireSerial(), dialog.FileName);
             AppendLog("[스크린샷] " + path);
             SetStatus("스크린샷 저장 완료", true);
         }
@@ -954,7 +905,6 @@ internal sealed class MainForm : Form
             SetStatus("Logcat 중지", true);
             return;
         }
-
         try
         {
             var serial = RequireSerial();
@@ -962,9 +912,7 @@ internal sealed class MainForm : Form
             var pkg = _packageBox.Text.Trim();
             if (!string.IsNullOrWhiteSpace(pkg)) pid = await _android.GetPidAsync(serial, pkg);
             AppendLog(pid is null ? "[Logcat] 전체 로그 시작" : $"[Logcat] {pkg} PID {pid} 로그 시작");
-            _logcatProcess = _android.StartLogcat(
-                serial,
-                pid,
+            _logcatProcess = _android.StartLogcat(serial, pid,
                 line => SafeUi(() => AppendLog(line)),
                 line => SafeUi(() => AppendLog("[stderr] " + line)),
                 _ => SafeUi(() => _logButton.Text = "Logcat 시작"));
@@ -978,8 +926,7 @@ internal sealed class MainForm : Form
     {
         try
         {
-            var serial = RequireSerial();
-            var r = await _android.ClearLogcatAsync(serial);
+            var r = await _android.ClearLogcatAsync(RequireSerial());
             if (!r.Success) throw new InvalidOperationException(CombineResult(r));
             AppendLog("[Logcat] 기기 로그 버퍼 비움");
         }
@@ -994,11 +941,9 @@ internal sealed class MainForm : Form
             UseDescriptionForTitle = true,
             SelectedPath = Directory.Exists(_sdkBox.Text) ? _sdkBox.Text : string.Empty
         };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            _sdkBox.Text = dialog.SelectedPath;
-            _ = RefreshEnvironmentAsync();
-        }
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _sdkBox.Text = dialog.SelectedPath;
+        _ = RefreshEnvironmentAsync();
     }
 
     private void ChooseApk(object? sender, EventArgs e)
@@ -1051,10 +996,8 @@ internal sealed class MainForm : Form
 
     private string RequireSerial()
     {
-        if (_deviceBox.SelectedItem is not AndroidDevice d)
-            throw new InvalidOperationException("가상폰을 먼저 켜 주세요.");
-        if (!string.Equals(d.State, "device", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Android 상태가 준비되지 않았습니다: {d.State}");
+        if (_deviceBox.SelectedItem is not AndroidDevice d) throw new InvalidOperationException("가상폰을 먼저 켜 주세요.");
+        if (!string.Equals(d.State, "device", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"Android 상태가 준비되지 않았습니다: {d.State}");
         return d.Serial;
     }
 
