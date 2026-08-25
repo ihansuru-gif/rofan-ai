@@ -5,6 +5,10 @@ on:
     paths:
       - 'APK-PC-Tester/**'
       - '.github/workflows/apk-pc-tester-build.yml'
+  pull_request:
+    paths:
+      - 'APK-PC-Tester/**'
+      - '.github/workflows/apk-pc-tester-build.yml'
   workflow_dispatch:
 
 jobs:
