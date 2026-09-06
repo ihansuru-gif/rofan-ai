@@ -1,0 +1,141 @@
+name: WallpaperPadding v1.0.2 Codex QA
+
+on:
+  push:
+    branches:
+      - wallpaper-padding-codex-qa-20260906
+
+permissions:
+  contents: read
+
+jobs:
+  qa-build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout isolated QA branch
+        uses: actions/checkout@v4
+
+      - name: Verify and extract source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=.build/wallpaper-padding-v102/source.zip
+          echo "94a5a6ffabb26bec4080589c9881954e803901612814c8d8d331c98626038a5c  $SRC" | sha256sum -c -
+          unzip -q "$SRC"
+          test -f WallpaperPadding/settings.gradle
+          test -f WallpaperPadding/app/src/main/AndroidManifest.xml
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Core calculator QA x3
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qa-classes
+          javac -d qa-classes \
+            WallpaperPadding/app/src/main/java/com/ihansuru/wallpaperpadding/ImageLayoutCalculator.java \
+            WallpaperPadding/app/src/main/java/com/ihansuru/wallpaperpadding/DecodeSizeCalculator.java \
+            WallpaperPadding/tools/LayoutCalculatorTest.java \
+            WallpaperPadding/tools/DecodeSizeCalculatorTest.java \
+            WallpaperPadding/tools/ExpectedScenarioTest.java
+          for seed in 1101 2202 3303; do java -cp qa-classes LayoutCalculatorTest "$seed" 100000; done
+          for n in 1 2 3; do java -cp qa-classes DecodeSizeCalculatorTest; done
+
+      - name: Expected scenarios x3
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -cp qa-classes ExpectedScenarioTest normal
+          java -cp qa-classes ExpectedScenarioTest edge
+          java -cp qa-classes ExpectedScenarioTest memory
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Android Lint
+        working-directory: WallpaperPadding
+        run: gradle --no-daemon :app:lintDebug
+
+      - name: Build debug APK
+        working-directory: WallpaperPadding
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK x3 and inspect manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=WallpaperPadding/app/build/outputs/apk/debug/app-debug.apk
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          test -s "$APK"
+          for n in 1 2 3; do unzip -t "$APK" >/dev/null; done
+          "$BT/zipalign" -c -v 4 "$APK" >/dev/null
+          "$BT/apksigner" verify --verbose "$APK"
+          "$BT/aapt" dump badging "$APK" | tee apk-badging.txt
+          "$BT/aapt" dump permissions "$APK" | tee apk-permissions.txt
+          grep -q "package: name='com.ihansuru.wallpaperpadding' versionCode='3' versionName='1.0.2'" apk-badging.txt
+          grep -q 'android.permission.SET_WALLPAPER' apk-permissions.txt
+          if grep -q 'android.permission.INTERNET' apk-permissions.txt; then echo 'Unexpected INTERNET permission'; exit 1; fi
+          if grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' apk-permissions.txt; then echo 'Unexpected storage permission'; exit 1; fi
+          sha256sum "$APK" | tee apk-sha256.txt
+
+      - name: Install emulator image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'emulator' 'system-images;android-35;google_apis;x86_64'
+          echo no | avdmanager create avd -n WallpaperPaddingQA -k 'system-images;android-35;google_apis;x86_64' --force
+
+      - name: Android emulator smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=WallpaperPadding/app/build/outputs/apk/debug/app-debug.apk
+          EMULATOR="$ANDROID_HOME/emulator/emulator"
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; fi
+          nohup "$EMULATOR" -avd WallpaperPaddingQA -no-window -noaudio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -wipe-data > emulator.log 2>&1 &
+          "$ADB" wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+          "$ADB" install -r "$APK"
+          "$ADB" shell am force-stop com.ihansuru.wallpaperpadding
+          "$ADB" logcat -c
+          "$ADB" shell monkey -p com.ihansuru.wallpaperpadding -c android.intent.category.LAUNCHER 1
+          sleep 5
+          "$ADB" shell pidof com.ihansuru.wallpaperpadding | tee app-pid.txt
+          test -s app-pid.txt
+          "$ADB" shell dumpsys activity activities | grep -q 'com.ihansuru.wallpaperpadding/.MainActivity'
+          "$ADB" exec-out screencap -p > smoke-screen.png
+          test -s smoke-screen.png
+          "$ADB" logcat -d -t 500 > smoke-logcat.txt
+          if grep -E 'FATAL EXCEPTION|AndroidRuntime.*Process: com\.ihansuru\.wallpaperpadding' smoke-logcat.txt; then exit 1; fi
+
+      - name: Upload validated APK and QA evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: WallpaperPadding-v1.0.2-Codex-QA
+          path: |
+            WallpaperPadding/app/build/outputs/apk/debug/app-debug.apk
+            WallpaperPadding/app/build/reports/lint-results-debug.html
+            apk-badging.txt
+            apk-permissions.txt
+            apk-sha256.txt
+            smoke-screen.png
+            smoke-logcat.txt
+          if-no-files-found: error
