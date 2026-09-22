@@ -22,7 +22,7 @@ jobs:
         id: source
         shell: bash
         run: |
-          if [ -s ScreenRecorderQA/project.zip.b64 ]; then
+          if [ -f ScreenRecorderQA/project.ready ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p qa-src
-          base64 -d ScreenRecorderQA/project.zip.b64 > qa-src/project.zip
+          cat ScreenRecorderQA/project.b64.part-* | base64 -d > qa-src/project.zip
           echo "8556a4bf15f17b3ee54adfcf7921b64b2895903bf14a230e9d03eee64a0bee5c  qa-src/project.zip" | sha256sum -c -
           unzip -q qa-src/project.zip -d qa-src
           python3 qa-src/simple-screen-recorder/tools/qa_structure.py
