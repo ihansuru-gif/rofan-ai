@@ -1,0 +1,217 @@
+name: Simple Screen Recorder v2.2 Reliability QA
+
+on:
+  push:
+    branches:
+      - qa/simple-screen-recorder-v2-2
+    paths:
+      - '.qa/simple-screen-recorder-v2-2/**'
+      - '.github/workflows/ssr-v2-2-reliability-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-emulator-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify transfer chunks and reconstruct source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'cf6c2a6b952ed96c1069ec18bbb17e8592e3e2068cfd41254b431551bc5b5365  .qa/simple-screen-recorder-v2-2/source.b64.00' | sha256sum -c -
+          echo '9e4e508b2009004a90ca617241302dcfbcd511fab243d3444f3435e0ea86ab2c  .qa/simple-screen-recorder-v2-2/source.b64.01' | sha256sum -c -
+          echo 'd19f84f676df8ce4dee4286b60cbdc9ba78faf28edd15485e565815010a8d016  .qa/simple-screen-recorder-v2-2/source.b64.02' | sha256sum -c -
+          echo '0c2a6b7308ebb261fdf7e48576aa0ab17e067201aa67d8c241a5843eaca4b309  .qa/simple-screen-recorder-v2-2/source.b64.03' | sha256sum -c -
+          echo 'b2159394975b61c140fec7e7a1aa9cf903b03f837664af20e68650e22d57f752  .qa/simple-screen-recorder-v2-2/source.b64.04' | sha256sum -c -
+          echo '6192b2e8880a6e48138d9319d20602e7b693d0af198839626e6362b8c5494ab7  .qa/simple-screen-recorder-v2-2/source.b64.05' | sha256sum -c -
+          cat .qa/simple-screen-recorder-v2-2/source.b64.* | tr -d '\r\n' | base64 -d > /tmp/ssr-source.zip
+          echo '29f14cfc79f0acc627b22ed4c06ab4899b9ecb671f4c3afdd8e66d4ff712e93a  /tmp/ssr-source.zip' | sha256sum -c -
+          unzip -q /tmp/ssr-source.zip -d /tmp/ssr-src
+          test -f /tmp/ssr-src/simple-screen-recorder-v2.1-reliability/app/build.gradle
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Ensure Android 35 SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Generate wrapper and build debug APK
+        shell: bash
+        working-directory: /tmp/ssr-src/simple-screen-recorder-v2.1-reliability
+        run: |
+          set -euo pipefail
+          gradle wrapper --gradle-version 8.9
+          chmod +x gradlew
+          ./gradlew --no-daemon clean :app:assembleDebug --stacktrace
+          test -s app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Pixel 5 Android 35 reliability QA
+        uses: ReactiveCircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-snapshot-load -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          script: |
+            set -euo pipefail
+            PKG=com.bulbyeot.simplerecorder
+            APK=/tmp/ssr-src/simple-screen-recorder-v2.1-reliability/app/build/outputs/apk/debug/app-debug.apk
+
+            dump_ui() {
+              adb shell uiautomator dump /sdcard/window.xml >/dev/null
+              adb pull /sdcard/window.xml /tmp/window.xml >/dev/null
+            }
+
+            get_xy() {
+              local wanted="$1"
+              dump_ui
+              python3 - "$wanted" <<'PY'
+import re, sys, xml.etree.ElementTree as ET
+wanted = sys.argv[1]
+root = ET.parse('/tmp/window.xml').getroot()
+for node in root.iter('node'):
+    if node.attrib.get('text') == wanted:
+        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds',''))
+        if m:
+            x1,y1,x2,y2 = map(int,m.groups())
+            print((x1+x2)//2, (y1+y2)//2)
+            raise SystemExit
+raise SystemExit('UI text not found: ' + wanted)
+PY
+            }
+
+            tap_text() {
+              local wanted="$1"
+              local xy
+              xy=$(get_xy "$wanted")
+              adb shell input tap $xy
+            }
+
+            assert_text() {
+              local wanted="$1"
+              dump_ui
+              python3 - "$wanted" <<'PY'
+import sys, xml.etree.ElementTree as ET
+wanted = sys.argv[1]
+root = ET.parse('/tmp/window.xml').getroot()
+if not any(node.attrib.get('text') == wanted for node in root.iter('node')):
+    raise SystemExit('UI text not found: ' + wanted)
+PY
+            }
+
+            adb install -r "$APK"
+            adb shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow
+            adb logcat -c
+
+            adb shell am start -W -n "$PKG/.qa.QaOverlayActivity"
+            sleep 2
+            assert_text 'QA 오버레이 실행 중'
+            assert_text '아래 앱 터치 테스트 0'
+
+            get_xy '아래 앱 터치 테스트 0' > /tmp/under.xy
+            read UX UY < /tmp/under.xy
+            adb shell input tap "$UX" "$UY"
+            sleep 1
+            assert_text '아래 앱 터치 테스트 1'
+
+            tap_text '●'
+            tap_text '✎'
+            sleep 1
+            adb shell input tap "$UX" "$UY"
+            sleep 1
+            tap_text '✎✓'
+            sleep 1
+            assert_text '아래 앱 터치 테스트 1'
+
+            adb shell input tap "$UX" "$UY"
+            sleep 1
+            assert_text '아래 앱 터치 테스트 2'
+
+            tap_text '◎'
+            adb shell input tap 320 520
+            sleep 2
+            assert_text '아래 앱 터치 테스트 2'
+
+            adb shell settings put system accelerometer_rotation 0
+            adb shell settings put system user_rotation 1
+            sleep 2
+            assert_text 'QA 오버레이 실행 중'
+            assert_text '●'
+            adb shell settings put system user_rotation 0
+            sleep 2
+            assert_text 'QA 오버레이 실행 중'
+
+            tap_text '■'
+            sleep 1
+            assert_text 'QA 오버레이 중지됨'
+
+            adb shell am force-stop "$PKG"
+            adb shell pm revoke "$PKG" android.permission.RECORD_AUDIO || true
+            adb shell am start -W -n "$PKG/.ui.MainActivity"
+            sleep 1
+            tap_text '녹화 시작 · 목소리 포함'
+            sleep 1
+            adb shell input keyevent BACK
+            sleep 1
+
+            adb shell pm grant "$PKG" android.permission.RECORD_AUDIO
+            tap_text '녹화 시작 · 목소리 포함'
+            sleep 1
+            adb shell input keyevent BACK
+            sleep 2
+            assert_text '준비됨'
+
+            adb logcat -d > /tmp/ssr-logcat.txt
+            if grep -E "FATAL EXCEPTION|ANR in $PKG" /tmp/ssr-logcat.txt; then
+              echo 'App crash/ANR detected'
+              exit 1
+            fi
+
+            adb exec-out screencap -p > /tmp/ssr-final.png
+            test "$(stat -c%s /tmp/ssr-final.png)" -gt 1000
+
+      - name: Package wrapper-complete project
+        if: always()
+        shell: bash
+        run: |
+          if [ -d /tmp/ssr-src/simple-screen-recorder-v2.1-reliability ]; then
+            cd /tmp/ssr-src
+            zip -qr /tmp/SimpleScreenRecorder-v2.1-reliability-project.zip simple-screen-recorder-v2.1-reliability -x '*/.gradle/*' '*/build/*' '*/app/build/*'
+          fi
+
+      - name: Upload QA outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleScreenRecorder-v2.1-QA
+          path: |
+            /tmp/ssr-src/simple-screen-recorder-v2.1-reliability/app/build/outputs/apk/debug/app-debug.apk
+            /tmp/SimpleScreenRecorder-v2.1-reliability-project.zip
+            /tmp/ssr-logcat.txt
+            /tmp/ssr-final.png
+          if-no-files-found: warn
