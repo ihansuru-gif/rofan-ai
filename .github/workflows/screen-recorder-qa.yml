@@ -51,6 +51,9 @@ jobs:
           cat ScreenRecorderQA/project.b64.part-* | base64 -d > qa-src/project.zip
           echo "8556a4bf15f17b3ee54adfcf7921b64b2895903bf14a230e9d03eee64a0bee5c  qa-src/project.zip" | sha256sum -c -
           unzip -q qa-src/project.zip -d qa-src
+          if [ -f ScreenRecorderQA/patch.sh ]; then
+            bash ScreenRecorderQA/patch.sh qa-src/simple-screen-recorder
+          fi
           python3 qa-src/simple-screen-recorder/tools/qa_structure.py
 
       - name: Build debug APK
