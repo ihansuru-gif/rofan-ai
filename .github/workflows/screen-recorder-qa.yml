@@ -26,7 +26,6 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "QA source not uploaded yet; bootstrap run only."
           fi
 
       - name: Setup JDK 17
@@ -42,7 +41,7 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Decode project
+      - name: Decode and verify project
         if: steps.source.outputs.present == 'true'
         shell: bash
         run: |
@@ -84,7 +83,7 @@ jobs:
             sudo apt-get install -y ffmpeg
           fi
 
-      - name: Real Android 15 emulator QA
+      - name: Android 15 Pixel 5 emulator QA
         if: steps.source.outputs.present == 'true'
         uses: ReactiveCircus/android-emulator-runner@v2.38.0
         with:
@@ -101,6 +100,7 @@ jobs:
             ACT="$APP/.ui.MainActivity"
             APK="$GITHUB_WORKSPACE/qa-src/simple-screen-recorder/app/build/outputs/apk/debug/app-debug.apk"
             QA="$GITHUB_WORKSPACE/qa-output"
+            HELPER="$GITHUB_WORKSPACE/ScreenRecorderQA/tap_ui.py"
             mkdir -p "$QA"
 
             save_diag() {
@@ -118,78 +118,29 @@ jobs:
               adb pull /sdcard/window.xml "$out" >/dev/null
             }
 
-            tap_res() {
-              local resid="$1"
-              dump_ui "$QA/ui-current.xml"
-              local coords
-              coords=$(python3 - "$QA/ui-current.xml" "$resid" <<'PY'
-import re, sys, xml.etree.ElementTree as ET
-root=ET.parse(sys.argv[1]).getroot()
-want=sys.argv[2]
-for n in root.iter("node"):
-    rid=n.attrib.get("resource-id","")
-    if rid==want or rid.endswith("/"+want):
-        m=re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",n.attrib.get("bounds",""))
-        if m:
-            x1,y1,x2,y2=map(int,m.groups())
-            print((x1+x2)//2,(y1+y2)//2)
-            raise SystemExit
-raise SystemExit(3)
-PY
-              )
-              adb shell input tap $coords
-            }
-
-            tap_text_any() {
+            tap_regex() {
               local regex="$1"
               dump_ui "$QA/ui-current.xml"
               local coords
-              coords=$(python3 - "$QA/ui-current.xml" "$regex" "$APP" <<'PY'
-import re, sys, xml.etree.ElementTree as ET
-root=ET.parse(sys.argv[1]).getroot()
-rx=re.compile(sys.argv[2],re.I)
-app=sys.argv[3]
-candidates=[]
-for n in root.iter("node"):
-    text=(n.attrib.get("text","")+" "+n.attrib.get("content-desc","")).strip()
-    pkg=n.attrib.get("package","")
-    rid=n.attrib.get("resource-id","")
-    if rx.search(text) or rx.search(rid):
-        m=re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",n.attrib.get("bounds",""))
-        if m:
-            x1,y1,x2,y2=map(int,m.groups())
-            score=0 if pkg!=app else 10
-            if rid.endswith("button1") or "start_now" in rid.lower(): score-=5
-            candidates.append((score,(x1+x2)//2,(y1+y2)//2,text,pkg,rid))
-if not candidates:
-    raise SystemExit(4)
-candidates.sort()
-_,x,y,*_=candidates[0]
-print(x,y)
-PY
-              )
+              coords=$(python3 "$HELPER" "$QA/ui-current.xml" "$regex" "$APP")
               adb shell input tap $coords
+            }
+
+            tap_res() {
+              local resid="$1"
+              tap_regex "$resid"
             }
 
             allow_projection() {
               sleep 1
               dump_ui "$QA/projection-dialog.xml"
               adb exec-out screencap -p > "$QA/projection-dialog.png"
-              tap_text_any 'Start now|Start recording|Share screen|지금 시작|녹화 시작|화면 공유|android:id/button1|start_now'
+              tap_regex 'Start now|Start recording|Share screen|지금 시작|녹화 시작|화면 공유|android:id/button1|start_now'
             }
 
             assert_service_running() {
               adb shell dumpsys activity services "$APP" | tee "$QA/service-running.txt"
               grep -q "ScreenRecordService" "$QA/service-running.txt"
-            }
-
-            start_recording_cycle() {
-              adb shell am start -W -n "$ACT" >/dev/null
-              sleep 1
-              tap_res "$APP:id/startButton"
-              allow_projection
-              sleep 3
-              assert_service_running
             }
 
             adb shell wm size 720x1600
@@ -200,7 +151,6 @@ PY
             adb shell pm grant "$APP" android.permission.RECORD_AUDIO
             adb shell pm grant "$APP" android.permission.POST_NOTIFICATIONS || true
             adb shell appops set "$APP" SYSTEM_ALERT_WINDOW allow || adb shell appops set "$APP" android:system_alert_window allow
-            adb shell appops get "$APP" SYSTEM_ALERT_WINDOW | tee "$QA/overlay-appop.txt"
 
             adb logcat -c
             adb shell am start -W -n "$ACT" | tee "$QA/launch.txt"
@@ -209,7 +159,6 @@ PY
             adb exec-out screencap -p > "$QA/01-start.png"
             grep -q "$APP:id/startButton" "$QA/01-start.xml"
 
-            # First full cycle: mic + overlay + marker + drawing + rotation + save.
             tap_res "$APP:id/startButton"
             allow_projection
             sleep 3
@@ -222,31 +171,27 @@ PY
             dump_ui "$QA/03-home-toolbar.xml"
             adb exec-out screencap -p > "$QA/03-home-toolbar.png"
 
-            # Expand toolbar; prefer semantic text, fall back to its default coordinate.
-            if ! tap_text_any '^●$'; then adb shell input tap 630 290; fi
-            sleep 0.5
+            if ! tap_regex '^●$'; then adb shell input tap 630 290; fi
+            sleep 1
             dump_ui "$QA/04-toolbar-open.xml"
             adb exec-out screencap -p > "$QA/04-toolbar-open.png"
 
-            # Quick marker and capture it while visible.
-            if ! tap_text_any '^◎$'; then adb shell input tap 285 390; fi
+            if ! tap_regex '^◎$'; then adb shell input tap 285 390; fi
             sleep 0.2
             adb shell input tap 360 800
             sleep 0.2
             adb exec-out screencap -p > "$QA/05-quick-marker.png"
             sleep 1.7
 
-            # Drawing mode, draw a line, then close drawing.
-            if ! tap_text_any '^●$'; then adb shell input tap 630 290; fi
+            if ! tap_regex '^●$'; then adb shell input tap 630 290; fi
             sleep 0.3
-            if ! tap_text_any '^✎$'; then adb shell input tap 380 390; fi
+            if ! tap_regex '^✎$'; then adb shell input tap 380 390; fi
             sleep 0.3
             adb shell input swipe 140 700 560 700 400
             adb exec-out screencap -p > "$QA/06-drawing.png"
-            if ! tap_text_any '✎✓|^✎$'; then adb shell input tap 380 390; fi
+            if ! tap_regex '✎✓|^✎$'; then adb shell input tap 380 390; fi
             sleep 0.5
 
-            # Underlying UI remains usable after drawing overlay removal; rotate while recording.
             adb shell settings put system accelerometer_rotation 0
             adb shell settings put system user_rotation 1
             sleep 2
@@ -256,10 +201,9 @@ PY
             sleep 1
             assert_service_running
 
-            # Stop from floating toolbar.
-            if ! tap_text_any '^●$'; then adb shell input tap 630 290; fi
+            if ! tap_regex '^●$'; then adb shell input tap 630 290; fi
             sleep 0.3
-            if ! tap_text_any '^■$'; then adb shell input tap 570 390; fi
+            if ! tap_regex '^■$'; then adb shell input tap 570 390; fi
             sleep 5
 
             adb shell dumpsys activity services "$APP" > "$QA/service-after-stop.txt"
@@ -277,7 +221,6 @@ PY
             grep -Eq 'h264,video|video,h264' "$QA/ffprobe-first.txt"
             grep -Eq 'aac,audio|audio,aac' "$QA/ffprobe-first.txt"
 
-            # Second cycle proves session cleanup/restart works.
             adb shell am start -W -n "$ACT" >/dev/null
             sleep 1
             tap_res "$APP:id/startButton"
