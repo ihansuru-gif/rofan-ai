@@ -1,0 +1,44 @@
+package com.bulbyeot.sproutscript;
+
+import android.app.*;
+import android.os.*;
+import android.content.*;
+import android.net.Uri;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.view.*;
+import android.widget.*;
+import java.io.*;
+import java.util.*;
+import java.util.zip.*;
+import javax.xml.parsers.*;
+import org.w3c.dom.*;
+
+public class MainActivity extends Activity {
+    LinearLayout episodeBar, body; TextView fileLabel; Map<String,List<String[]>> scripts=new LinkedHashMap<>(); Map<String,String[]> meta=new LinkedHashMap<>();
+    int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
+    TextView tv(String s,int sp,boolean bold){TextView t=new TextView(this);t.setText(s);t.setTextSize(sp);t.setTextColor(Color.rgb(32,32,36));t.setPadding(0,dp(4),0,dp(4));if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);return t;}
+    @Override public void onCreate(Bundle b){super.onCreate(b);buildUi();}
+    void buildUi(){
+        ScrollView root=new ScrollView(this);LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setPadding(dp(18),dp(18),dp(18),dp(28));root.addView(page);
+        page.addView(tv("불볕이와 새싹이 대본함",24,true));TextView sub=tv("엑셀(.xlsx)을 직접 열어 회차별 대본으로 봅니다.",14,false);sub.setTextColor(Color.DKGRAY);page.addView(sub);
+        Button open=new Button(this);open.setText("엑셀 파일 열기");open.setTextSize(16);open.setAllCaps(false);open.setOnClickListener(v->pick());page.addView(open,new LinearLayout.LayoutParams(-1,dp(54)));
+        fileLabel=tv("아직 연 파일이 없음",12,false);fileLabel.setTextColor(Color.GRAY);page.addView(fileLabel);
+        HorizontalScrollView hsv=new HorizontalScrollView(this);hsv.setHorizontalScrollBarEnabled(false);episodeBar=new LinearLayout(this);episodeBar.setOrientation(LinearLayout.HORIZONTAL);hsv.addView(episodeBar);page.addView(hsv,new LinearLayout.LayoutParams(-1,dp(58)));
+        body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);page.addView(body);TextView empty=tv("위의 ‘엑셀 파일 열기’를 눌러\n인스타툰 관리본을 선택해줘.",18,true);empty.setGravity(Gravity.CENTER);empty.setPadding(0,dp(90),0,dp(90));body.addView(empty);setContentView(root);
+    }
+    void pick(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");startActivityForResult(i,7);}
+    @Override protected void onActivityResult(int r,int c,Intent d){super.onActivityResult(r,c,d);if(r==7&&c==RESULT_OK&&d!=null)load(d.getData());}
+    void load(Uri uri){fileLabel.setText("읽는 중…");new Thread(()->{try{File f=new File(getCacheDir(),"book.xlsx");try(InputStream in=getContentResolver().openInputStream(uri);OutputStream out=new FileOutputStream(f)){byte[] buf=new byte[65536];int n;while((n=in.read(buf))>0)out.write(buf,0,n);}parse(f);runOnUiThread(()->{fileLabel.setText("엑셀 열림");renderTabs();});}catch(Exception e){runOnUiThread(()->{fileLabel.setText("열기 실패");body.removeAllViews();body.addView(tv("이 파일을 읽지 못했어.\n"+e.getMessage(),15,false));});}}).start();}
+    void parse(File f)throws Exception{scripts.clear();meta.clear();try(ZipFile z=new ZipFile(f)){List<String> shared=shared(z);Map<String,String> sheetMap=sheetPaths(z);for(String p:sheetMap.values())consume(rows(z,p,shared));}}
+    Document xml(ZipFile z,String p)throws Exception{ZipEntry e=z.getEntry(p);if(e==null)return null;DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();f.setNamespaceAware(false);try(InputStream in=z.getInputStream(e)){return f.newDocumentBuilder().parse(in);}}
+    List<String> shared(ZipFile z)throws Exception{List<String>a=new ArrayList<>();Document d=xml(z,"xl/sharedStrings.xml");if(d==null)return a;NodeList sis=d.getElementsByTagName("si");for(int i=0;i<sis.getLength();i++){NodeList ts=((Element)sis.item(i)).getElementsByTagName("t");StringBuilder s=new StringBuilder();for(int j=0;j<ts.getLength();j++)s.append(ts.item(j).getTextContent());a.add(s.toString());}return a;}
+    Map<String,String> sheetPaths(ZipFile z)throws Exception{Map<String,String> rel=new HashMap<>(),out=new LinkedHashMap<>();Document rd=xml(z,"xl/_rels/workbook.xml.rels");if(rd!=null){NodeList n=rd.getElementsByTagName("Relationship");for(int i=0;i<n.getLength();i++){Element e=(Element)n.item(i);rel.put(e.getAttribute("Id"),e.getAttribute("Target"));}}Document w=xml(z,"xl/workbook.xml");NodeList n=w.getElementsByTagName("sheet");for(int i=0;i<n.getLength();i++){Element e=(Element)n.item(i);String t=rel.get(e.getAttribute("r:id"));if(t!=null){if(t.startsWith("/"))t=t.substring(1);else if(!t.startsWith("xl/"))t="xl/"+t;out.put(e.getAttribute("name"),t);}}return out;}
+    int col(String ref){int x=0;for(int i=0;i<ref.length()&&Character.isLetter(ref.charAt(i));i++)x=x*26+(Character.toUpperCase(ref.charAt(i))-'A'+1);return x-1;}
+    List<List<String>> rows(ZipFile z,String p,List<String> sh)throws Exception{List<List<String>>out=new ArrayList<>();Document d=xml(z,p);if(d==null)return out;NodeList rs=d.getElementsByTagName("row");for(int i=0;i<rs.getLength();i++){NodeList cs=((Element)rs.item(i)).getElementsByTagName("c");ArrayList<String>row=new ArrayList<>();for(int j=0;j<cs.getLength();j++){Element c=(Element)cs.item(j);int k=col(c.getAttribute("r"));while(row.size()<=k)row.add("");String type=c.getAttribute("t"),v="";NodeList vs=c.getElementsByTagName("v");if(vs.getLength()>0)v=vs.item(0).getTextContent();else{NodeList is=c.getElementsByTagName("t");if(is.getLength()>0)v=is.item(0).getTextContent();}if("s".equals(type)&&!v.isEmpty())try{v=sh.get(Integer.parseInt(v));}catch(Exception ignored){}row.set(k,v);}out.add(row);}return out;}
+    String norm(String s){return s==null?"":s.replaceAll("\\s+","").toLowerCase();}int find(List<String>h,String...keys){for(int i=0;i<h.size();i++){String x=norm(h.get(i));for(String k:keys)if(x.contains(norm(k)))return i;}return -1;}String get(List<String>r,int i){return i>=0&&i<r.size()?r.get(i).trim():"";}
+    void consume(List<List<String>> rows){if(rows.isEmpty())return;for(int hi=0;hi<Math.min(rows.size(),12);hi++){List<String>h=rows.get(hi);int ep=find(h,"에피소드","회차","번호"),scene=find(h,"장면","컷"),speaker=find(h,"화자","연출"),line=find(h,"대사","내용"),title=find(h,"제목"),idea=find(h,"소재","사건");if(ep<0)continue;if(line>=0||speaker>=0||scene>=0){String last="";for(int r=hi+1;r<rows.size();r++){List<String>x=rows.get(r);String e=get(x,ep);if(!e.isEmpty())last=e;if(last.isEmpty())continue;String sc=get(x,scene),sp=get(x,speaker),ln=get(x,line);if(sc.isEmpty()&&sp.isEmpty()&&ln.isEmpty())continue;scripts.computeIfAbsent(last,k->new ArrayList<>()).add(new String[]{sc,sp,ln});}return;}if(title>=0||idea>=0){for(int r=hi+1;r<rows.size();r++){List<String>x=rows.get(r);String e=get(x,ep);if(!e.isEmpty())meta.put(e,new String[]{get(x,title),get(x,idea)});}return;}}}
+    List<String> episodes(){LinkedHashSet<String>s=new LinkedHashSet<>();s.addAll(meta.keySet());s.addAll(scripts.keySet());ArrayList<String>a=new ArrayList<>(s);a.sort((x,y)->{try{return Integer.compare(Integer.parseInt(x.replaceAll("\\D","")),Integer.parseInt(y.replaceAll("\\D","")));}catch(Exception e){return x.compareTo(y);}});return a;}
+    void renderTabs(){episodeBar.removeAllViews();List<String>es=episodes();if(es.isEmpty()){body.removeAllViews();body.addView(tv("대본 형식의 시트를 찾지 못했어.",16,true));return;}for(String e:es){Button b=new Button(this);b.setText(e.replaceAll("\\.0$","")+"화");b.setAllCaps(false);b.setOnClickListener(v->render(e));episodeBar.addView(b,new LinearLayout.LayoutParams(dp(76),dp(52)));}render(es.get(0));}
+    void render(String e){body.removeAllViews();String[]m=meta.get(e);String title=m!=null?m[0]:"";body.addView(tv(e.replaceAll("\\.0$","")+"화"+(title.isEmpty()?"":" · "+title),23,true));if(m!=null&&!m[1].isEmpty()){TextView idea=tv(m[1],14,false);idea.setBackgroundColor(Color.rgb(244,244,246));idea.setPadding(dp(12),dp(10),dp(12),dp(10));body.addView(idea);}List<String[]>ls=scripts.get(e);if(ls==null||ls.isEmpty()){body.addView(tv("이 회차의 최종 대본 행이 없어.",15,false));return;}int n=1;for(String[]x:ls){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(14),dp(12),dp(14),dp(12));android.graphics.drawable.GradientDrawable g=new android.graphics.drawable.GradientDrawable();g.setColor(Color.WHITE);g.setCornerRadius(dp(12));g.setStroke(dp(1),Color.rgb(220,220,224));card.setBackground(g);card.addView(tv(x[0].isEmpty()?"장면 "+n:x[0],14,true));if(!x[1].isEmpty()){TextView sp=tv(x[1],13,true);sp.setTextColor(Color.rgb(90,90,98));card.addView(sp);}if(!x[2].isEmpty())card.addView(tv(x[2],17,false));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(7),0,dp(7));body.addView(card,lp);n++;}}
+}
