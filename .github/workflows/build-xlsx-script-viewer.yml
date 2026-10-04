@@ -2,7 +2,7 @@ name: Build XLSX Script Viewer APK
 on:
   push:
     branches: [ "build/xlsx-script-viewer-apk" ]
-  workflow_dispatch:
+  pull_request:\n    branches: [ "main" ]\n  workflow_dispatch:
 
 jobs:
   build:
