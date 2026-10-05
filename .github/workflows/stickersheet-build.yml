@@ -1,0 +1,118 @@
+name: StickerSheetMaker Android Build
+
+on:
+  push:
+    branches:
+      - stickersheet-build-20260822
+    paths:
+      - 'StickerSheetMaker/**'
+      - '.github/workflows/stickersheet-build.yml'
+      - '.github/scripts/stickersheet-emulator-smoke.sh'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'StickerSheetMaker/**'
+      - '.github/workflows/stickersheet-build.yml'
+      - '.github/scripts/stickersheet-emulator-smoke.sh'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install Android 16 SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Lint and build debug APK
+        working-directory: StickerSheetMaker
+        run: gradle :app:lintDebug :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StickerSheetMaker-v0.3.0-debug-apk
+          path: StickerSheetMaker/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StickerSheetMaker-lint-report
+          path: StickerSheetMaker/app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+  emulator-smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download built APK
+        uses: actions/download-artifact@v4
+        with:
+          name: StickerSheetMaker-v0.3.0-debug-apk
+          path: apk
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Enable KVM acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -c /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
+      - name: Install and launch on Android emulator
+        uses: ReactiveCircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash .github/scripts/stickersheet-emulator-smoke.sh
+
+      - name: Upload emulator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StickerSheetMaker-emulator-smoke
+          path: |
+            StickerSheetMaker-emulator-smoke.png
+            StickerSheetMaker-emulator-logcat.txt
+            StickerSheetMaker-emulator-activities.txt
+            StickerSheetMaker-am-start.txt
+          if-no-files-found: warn
